@@ -4,6 +4,16 @@
 # ============================================================
 
 import os
+import random
+
+# ============================================================
+# REPRODUCIBILITY — harus sebelum import TensorFlow
+# ============================================================
+SEED = 42
+os.environ['PYTHONHASHSEED']       = str(SEED)
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+os.environ['TF_DETERMINISTIC_OPS']  = '1'
+
 import numpy as np
 import tensorflow as tf
 import matplotlib.pyplot as plt
@@ -36,9 +46,11 @@ from itertools import cycle
 import warnings
 warnings.filterwarnings('ignore')
 
-# Reproducibility
-tf.random.set_seed(42)
-np.random.seed(42)
+# Reproducibility — set semua seed
+random.seed(SEED)
+np.random.seed(SEED)
+tf.random.set_seed(SEED)
+tf.config.experimental.enable_op_determinism()
 
 print('✅ TensorFlow version :', tf.__version__)
 print('✅ GPU tersedia       :', tf.config.list_physical_devices('GPU'))
@@ -127,7 +139,7 @@ train_generator = train_datagen.flow_from_directory(
     batch_size=BATCH_SIZE,
     class_mode='categorical',
     shuffle=True,
-    seed=42
+    seed=SEED
 )
 
 val_generator = val_test_datagen.flow_from_directory(
@@ -283,6 +295,8 @@ history_phase1 = model.fit(
     validation_data=val_generator,
     epochs=PHASE1_EPOCHS,
     callbacks=callbacks_phase1,
+    workers=1,
+    use_multiprocessing=False,
     verbose=1
 )
 
@@ -347,6 +361,8 @@ history_phase2 = model.fit(
     validation_data=val_generator,
     epochs=PHASE2_EPOCHS,
     callbacks=callbacks_phase2,
+    workers=1,
+    use_multiprocessing=False,
     verbose=1
 )
 
