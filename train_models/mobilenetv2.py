@@ -46,7 +46,7 @@ print('✅ GPU tersedia       :', tf.config.list_physical_devices('GPU'))
 # ============================================================
 # PATH
 # ============================================================
-BASE_DIR   = '/home/echolog/Documents/Project/www/skripsi/ImageClassification-CNN/train_models'
+BASE_DIR   = '/home/echolog/Documents/Project/www/skripsi/ImageClassification/train_models'
 
 TRAIN_DIR  = os.path.join(BASE_DIR, 'dataset', 'train')
 VAL_DIR    = os.path.join(BASE_DIR, 'dataset', 'val')

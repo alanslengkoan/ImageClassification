@@ -3,7 +3,7 @@ import os, shutil, random
 # ============================================================
 # KONFIGURASI PATH & KELAS
 # ============================================================
-BASE_DIR   = '/home/echolog/Documents/Project/www/skripsi/ImageClassification-CNN/train_models'
+BASE_DIR   = '/home/echolog/Documents/Project/www/skripsi/ImageClassification/train_models'
 SOURCE_DIR = os.path.join(BASE_DIR, 'dataset_all')   # folder dengan 3 sub-folder: baik/sedang/berat
 TRAIN_DIR  = os.path.join(BASE_DIR, 'dataset', 'train')
 VAL_DIR    = os.path.join(BASE_DIR, 'dataset', 'val')

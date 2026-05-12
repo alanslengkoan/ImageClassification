@@ -28,7 +28,7 @@ print('✅ TensorFlow version :', tf.__version__)
 # ============================================================
 # KONFIGURASI PATH
 # ============================================================
-BASE_DIR   = '/home/echolog/Documents/Project/www/skripsi/ImageClassification-CNN/train_models'
+BASE_DIR   = '/home/echolog/Documents/Project/www/skripsi/ImageClassification/train_models'
 TEST_DIR   = os.path.join(BASE_DIR, 'dataset', 'test')
 OUTPUT_DIR = os.path.join(BASE_DIR, 'dataset', 'output')
 
