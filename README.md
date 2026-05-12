@@ -211,6 +211,60 @@ Augmentasi yang lebih kuat memaksa ResNet50 untuk:
 
 Masing-masing model memerlukan preprocessing yang sesuai dengan cara model tersebut dilatih pada ImageNet. Penggunaan preprocessing yang salah dapat menurunkan performa signifikan.
 
+### 5.5 Faktor Spesifikasi Hardware
+
+| Komponen | Pengaruh Terhadap Training |
+|----------|---------------------------|
+| **CPU (Arsitektur & Instruksi)** | CPU berbeda (misal Intel Gen 11 vs Gen 12) memiliki instruksi floating-point berbeda (AVX2, AVX-VNNI, FMA). Operasi matematika yang sama bisa menghasilkan pembulatan desimal yang **sedikit berbeda**, dan perbedaan kecil ini terakumulasi selama jutaan operasi di setiap epoch, menyebabkan model akhir yang berbeda. |
+| **GPU vs CPU** | Training di GPU jauh lebih cepat (~10-50x), namun urutan eksekusi paralel di GPU bersifat non-deterministic secara default. Pada proyek ini kedua laptop menggunakan CPU karena CUDA error (ERROR 303). |
+| **RAM** | Jika RAM tidak mencukupi, OS melakukan swapping ke disk yang memperlambat training secara signifikan. Tidak mengubah hasil akhir model, tetapi memperpanjang waktu training. |
+| **Kecepatan Disk (SSD vs HDD)** | Mempengaruhi kecepatan loading gambar dari disk ke memory. HDD yang lambat bisa menjadi bottleneck pada data pipeline, terutama saat augmentasi real-time. |
+| **Thermal Throttling** | Laptop yang panas bisa menurunkan clock speed CPU, memperlambat training. Tidak mengubah hasil, tetapi epoch time menjadi tidak konsisten. |
+
+**Dampak pada Proyek Ini:**
+Training yang sama dijalankan di dua laptop dengan spesifikasi CPU berbeda menghasilkan perbedaan akurasi hingga ~9% (MobileNetV2: Laptop A 77.50% vs Laptop B 88.33%), yang disebabkan oleh akumulasi perbedaan floating-point rounding.
+
+### 5.6 Faktor Software & Library
+
+| Komponen | Pengaruh |
+|----------|----------|
+| **Versi TensorFlow** | Versi berbeda memiliki implementasi operasi internal yang berbeda. Proyek ini konsisten menggunakan TF 2.21.0 di kedua laptop. |
+| **oneDNN (Intel Math Kernel)** | Library akselerasi CPU dari Intel yang menggunakan algoritma **lebih cepat tetapi non-deterministic**. Ini penyebab utama perbedaan hasil antar laptop. Dinonaktifkan dengan `TF_ENABLE_ONEDNN_OPTS=0`. |
+| **Versi Python** | Perbedaan minor version Python bisa mempengaruhi random number generation dan hash ordering. |
+| **OS & Kernel** | Perbedaan OS (distro Linux, kernel version) mempengaruhi memory management, thread scheduling, dan floating-point behavior. |
+| **BLAS Backend** | Library aljabar linear (OpenBLAS, MKL) yang berbeda menghasilkan hasil numerik yang sedikit berbeda untuk operasi matriks yang sama. |
+
+### 5.7 Faktor Random Seed & Determinism
+
+Training neural network melibatkan banyak sumber randomness:
+
+| Sumber Randomness | Penjelasan | Solusi |
+|-------------------|-----------|--------|
+| **Weight Initialization** | Head classifier layer diinisialisasi dengan nilai random. Pre-trained backbone (ImageNet) sama, tapi head layer baru di-random. | `tf.random.set_seed(42)` |
+| **Data Shuffle** | Urutan gambar di setiap epoch di-shuffle secara random. Urutan berbeda → gradient berbeda → model akhir berbeda. | `seed=42` pada generator + `np.random.seed(42)` |
+| **Dropout Mask** | Neuron mana yang dimatikan saat training dipilih secara random setiap forward pass. | `tf.random.set_seed(42)` |
+| **Augmentasi Random** | Rotasi, flip, zoom, brightness dipilih secara random untuk setiap gambar setiap epoch. | `random.seed(42)` + `np.random.seed(42)` |
+| **Non-deterministic TF Ops** | Beberapa operasi TensorFlow (conv, pooling, reduce) menggunakan algoritma paralel yang hasilnya bergantung pada urutan eksekusi thread. | `tf.config.experimental.enable_op_determinism()` |
+| **oneDNN Rounding** | Optimasi CPU Intel menggunakan reordering dan fused operations yang hasilnya berbeda antar arsitektur CPU. | `TF_ENABLE_ONEDNN_OPTS=0` |
+| **Python Hash Seed** | Hash ordering di Python mempengaruhi urutan iterasi dictionary dan set. | `PYTHONHASHSEED=42` |
+
+**Konfigurasi Reproducibility yang Diterapkan:**
+
+```python
+# Harus diset SEBELUM import TensorFlow
+os.environ['PYTHONHASHSEED']        = '42'
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+os.environ['TF_DETERMINISTIC_OPS']  = '1'
+
+# Setelah import
+random.seed(42)
+np.random.seed(42)
+tf.random.set_seed(42)
+tf.config.experimental.enable_op_determinism()
+```
+
+**Trade-off:** Mode deterministic bisa **5-15% lebih lambat** karena tidak menggunakan algoritma paralel tercepat, tetapi menjamin hasil yang **identik** di setiap run pada hardware yang sama.
+
 ---
 
 ## 6. Analisis Per-Kelas

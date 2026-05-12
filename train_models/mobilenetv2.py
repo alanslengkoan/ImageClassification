@@ -41,6 +41,7 @@ from sklearn.metrics import (
 )
 
 from sklearn.preprocessing import label_binarize
+from sklearn.utils import class_weight
 from itertools import cycle
 
 import warnings
@@ -75,13 +76,13 @@ BATCH_SIZE       = 16
 NUM_CLASSES      = 3
 
 # Phase 1: Head only
-PHASE1_EPOCHS    = 15
+PHASE1_EPOCHS    = 20
 PHASE1_LR        = 0.001
 
 # Phase 2: Fine-tune
 PHASE2_EPOCHS    = 60
-PHASE2_LR        = 0.00003
-FINE_TUNE_LAYERS = 80
+PHASE2_LR        = 0.00005
+FINE_TUNE_LAYERS = 50
 
 print('\n============================================================')
 print('⚙️ KONFIGURASI TRAINING')
@@ -92,7 +93,7 @@ print(f'BATCH_SIZE          : {BATCH_SIZE}')
 print(f'Phase 1 Epochs      : {PHASE1_EPOCHS} (head only, LR={PHASE1_LR})')
 print(f'Phase 2 Epochs      : {PHASE2_EPOCHS} (fine-tune, LR={PHASE2_LR})')
 print(f'FINE_TUNE_LAYERS    : {FINE_TUNE_LAYERS}')
-print(f'TARGET TEST ACC     : >= 80%')
+print(f'TARGET TEST ACC     : >= 85%')
 
 # ============================================================
 # AUGMENTASI
@@ -100,17 +101,17 @@ print(f'TARGET TEST ACC     : >= 80%')
 train_datagen = ImageDataGenerator(
     preprocessing_function=preprocess_input,
 
-    rotation_range=15,
-    width_shift_range=0.10,
-    height_shift_range=0.10,
+    rotation_range=20,
+    width_shift_range=0.15,
+    height_shift_range=0.15,
 
-    shear_range=0.08,
-    zoom_range=0.10,
+    shear_range=0.10,
+    zoom_range=0.15,
 
     horizontal_flip=True,
     vertical_flip=False,
 
-    brightness_range=[0.90, 1.10],
+    brightness_range=[0.85, 1.15],
 
     fill_mode='nearest'
 )
@@ -165,10 +166,19 @@ print('\n============================================================')
 print('📊 DATASET')
 print('============================================================')
 
+# Class weights untuk bantu kelas minority
+class_weights_array = class_weight.compute_class_weight(
+    class_weight='balanced',
+    classes=np.unique(train_generator.classes),
+    y=train_generator.classes
+)
+class_weights_dict = dict(enumerate(class_weights_array))
+
 print(f'Train : {train_generator.samples}')
 print(f'Val   : {val_generator.samples}')
 print(f'Test  : {test_generator.samples}')
 print(f'Class : {CLASS_LABELS}')
+print(f'Class Weights : {class_weights_dict}')
 
 # ============================================================
 # BASE MODEL — PHASE 1: FREEZE ALL
@@ -212,7 +222,7 @@ x = layers.Dense(
 
 x = layers.BatchNormalization()(x)
 
-x = layers.Dropout(0.3)(x)
+x = layers.Dropout(0.4)(x)
 
 x = layers.Dense(
     128,
@@ -222,7 +232,7 @@ x = layers.Dense(
 
 x = layers.BatchNormalization()(x)
 
-x = layers.Dropout(0.2)(x)
+x = layers.Dropout(0.3)(x)
 
 outputs = layers.Dense(
     NUM_CLASSES,
@@ -295,6 +305,7 @@ history_phase1 = model.fit(
     validation_data=val_generator,
     epochs=PHASE1_EPOCHS,
     callbacks=callbacks_phase1,
+    class_weight=class_weights_dict,
     verbose=1
 )
 
@@ -333,7 +344,7 @@ callbacks_phase2 = [
 
     EarlyStopping(
         monitor='val_accuracy',
-        patience=12,
+        patience=15,
         restore_best_weights=True,
         verbose=1
     ),
@@ -359,6 +370,7 @@ history_phase2 = model.fit(
     validation_data=val_generator,
     epochs=PHASE2_EPOCHS,
     callbacks=callbacks_phase2,
+    class_weight=class_weights_dict,
     verbose=1
 )
 
@@ -581,7 +593,7 @@ print(f'Test Accuracy         : {test_acc*100:.2f}%')
 print(f'Test Loss             : {test_loss:.4f}')
 
 print(f'Fine Tune Layers      : {FINE_TUNE_LAYERS}')
-print(f'Dropout               : 0.30 / 0.20')
+print(f'Dropout               : 0.40 / 0.30')
 print(f'Label Smoothing       : 0.05')
 print(f'Strategy              : Two-Phase + TTA')
 
