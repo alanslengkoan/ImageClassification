@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Deteksi Kerusakan Jalan — ResNet50</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background: #f0f4f8; }
+    .drop-zone { transition: border-color .2s, background .2s; }
+    .drop-zone.dragover { border-color: #3b82f6; background: #eff6ff; }
+    .bar-fill { transition: width 1s ease; }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
+    .fade-in { animation: fadeIn .5s ease forwards; }
+    .thumb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 8px; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- HEADER -->
+  <header class="bg-white shadow-sm border-b border-gray-200">
+    <div class="max-w-5xl mx-auto px-4 py-4 flex items-center gap-3">
+      <span class="text-3xl">🛣️</span>
+      <div>
+        <h1 class="text-xl font-bold text-gray-800">Deteksi Kerusakan Jalan</h1>
+        <p class="text-sm text-gray-500">ResNet50 Fine-Tuning · 3 Kelas · ImageNet Pretrained</p>
+      </div>
+    </div>
+  </header>
+
+  <main class="flex-1 max-w-5xl mx-auto w-full px-4 py-8 space-y-6">
+
+    <!-- UPLOAD CARD -->
+    <div class="bg-white rounded-2xl shadow p-6">
+      <h2 class="text-lg font-semibold text-gray-700 mb-4">Upload Foto Jalan</h2>
+
+      <form method="post" enctype="multipart/form-data" id="uploadForm">
+        {% csrf_token %}
+
+        <!-- DROP ZONE -->
+        <div id="dropZone"
+             class="drop-zone border-2 border-dashed border-gray-300 rounded-xl p-8
+                    flex flex-col items-center justify-center cursor-pointer
+                    hover:border-blue-400 hover:bg-blue-50 text-center">
+          <span class="text-5xl mb-3">📷</span>
+          <p class="text-gray-600 font-medium">Drag & drop foto di sini</p>
+          <p class="text-gray-400 text-sm mt-1">atau klik untuk memilih file</p>
+          <p class="text-gray-400 text-xs mt-2">Format: JPG, JPEG, PNG · Maks 10 file · 10 MB/file</p>
+          <input type="file" name="images" id="imageInput" accept="image/*"
+                 class="hidden" multiple required />
+        </div>
+
+        <!-- PREVIEW THUMBNAILS -->
+        <div id="previewBox" class="hidden mt-4">
+          <div class="flex items-center justify-between mb-2">
+            <p class="text-sm font-medium text-gray-600">
+              <span id="fileCount">0</span> file dipilih
+            </p>
+            <button type="button" id="clearBtn"
+                    class="text-xs text-red-500 hover:underline">Hapus semua</button>
+          </div>
+          <div id="thumbGrid" class="thumb-grid"></div>
+        </div>
+
+        <!-- ERROR -->
+        {% if error %}
+        <div class="mt-4 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
+          ⚠️ {{ error }}
+        </div>
+        {% endif %}
+
+        <button type="submit" id="submitBtn"
+                class="mt-5 w-full py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800
+                       text-white font-semibold rounded-xl shadow transition flex items-center justify-center gap-2">
+          <span id="btnText">🔍 Analisis Gambar</span>
+          <span id="btnLoader" class="hidden">
+            <svg class="animate-spin h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+            </svg>
+            Memproses...
+          </span>
+        </button>
+      </form>
+    </div>
+
+    <!-- HASIL PREDIKSI -->
+    {% if results %}
+    <div class="fade-in space-y-4">
+
+      <!-- RINGKASAN -->
+      <div class="bg-white rounded-2xl shadow px-6 py-4 flex items-center justify-between">
+        <h2 class="text-lg font-semibold text-gray-700">
+          Hasil Analisis
+          <span class="ml-2 text-sm font-normal text-gray-400">({{ total }} gambar)</span>
+        </h2>
+        <a href="/" class="text-sm text-blue-600 hover:underline">← Upload ulang</a>
+      </div>
+
+      <!-- ERROR PER FILE -->
+      {% if errors %}
+      <div class="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700 space-y-1">
+        {% for e in errors %}
+        <p>⚠️ {{ e }}</p>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <!-- GRID HASIL -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+        {% for r in results %}
+        <div class="bg-white rounded-2xl shadow overflow-hidden">
+
+          <!-- Gambar -->
+          <div class="relative">
+            <img src="{{ r.image_url }}" alt="{{ r.filename }}"
+                 class="w-full h-48 object-cover" />
+            <!-- Badge kondisi di atas gambar -->
+            <div class="absolute top-2 left-2">
+              {% if r.pred_color == "green" %}
+              <span class="px-3 py-1 bg-green-500 text-white text-xs font-bold rounded-full shadow">
+                {{ r.pred_icon }} {{ r.pred_label }}
+              </span>
+              {% elif r.pred_color == "yellow" %}
+              <span class="px-3 py-1 bg-yellow-400 text-white text-xs font-bold rounded-full shadow">
+                {{ r.pred_icon }} {{ r.pred_label }}
+              </span>
+              {% else %}
+              <span class="px-3 py-1 bg-red-500 text-white text-xs font-bold rounded-full shadow">
+                {{ r.pred_icon }} {{ r.pred_label }}
+              </span>
+              {% endif %}
+            </div>
+            <!-- Confidence di pojok kanan -->
+            <div class="absolute top-2 right-2 bg-black bg-opacity-50 text-white text-xs font-bold px-2 py-1 rounded-full">
+              {{ r.confidence }}%
+            </div>
+          </div>
+
+          <!-- Detail -->
+          <div class="p-4 space-y-3">
+            <!-- Nama file + deskripsi -->
+            <div>
+              <p class="text-xs text-gray-400 truncate" title="{{ r.filename }}">{{ r.filename }}</p>
+              <p class="text-sm text-gray-600 mt-1">{{ r.pred_desc }}</p>
+            </div>
+
+            <!-- Probability Bars -->
+            <div class="space-y-2 pt-2 border-t border-gray-100">
+              {% for p in r.probabilities %}
+              <div>
+                <div class="flex justify-between text-xs mb-0.5">
+                  <span class="text-gray-600">
+                    {% if p.color == "green" %}🟢
+                    {% elif p.color == "yellow" %}🟡
+                    {% else %}🔴{% endif %}
+                    {{ p.label }}
+                  </span>
+                  <span class="font-semibold
+                    {% if p.color == 'green' %}text-green-600
+                    {% elif p.color == 'yellow' %}text-yellow-600
+                    {% else %}text-red-600{% endif %}">
+                    {{ p.value }}%
+                  </span>
+                </div>
+                <div class="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+                  <div class="bar-fill h-2 rounded-full
+                    {% if p.color == 'green' %}bg-green-500
+                    {% elif p.color == 'yellow' %}bg-yellow-400
+                    {% else %}bg-red-500{% endif %}"
+                    data-width="{{ p.width }}">
+                  </div>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+
+        </div>
+        {% endfor %}
+      </div>
+
+    </div>
+    {% endif %}
+
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="text-center text-xs text-gray-400 py-4 border-t border-gray-200 bg-white mt-4">
+    Tugas Akhir · Klasifikasi Kerusakan Jalan · ResNet50 · TensorFlow
+  </footer>
+
+  <script>
+    const dropZone  = document.getElementById('dropZone');
+    const input     = document.getElementById('imageInput');
+    const previewBox = document.getElementById('previewBox');
+    const thumbGrid = document.getElementById('thumbGrid');
+    const fileCount = document.getElementById('fileCount');
+    const clearBtn  = document.getElementById('clearBtn');
+    const form      = document.getElementById('uploadForm');
+    const btnText   = document.getElementById('btnText');
+    const btnLoader = document.getElementById('btnLoader');
+
+    const MAX_FILES = 10;
+
+    dropZone.addEventListener('click', () => input.click());
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      setFiles(e.dataTransfer.files);
+    });
+    input.addEventListener('change', () => setFiles(input.files));
+
+    function setFiles(fileList) {
+      const files = Array.from(fileList).slice(0, MAX_FILES);
+      if (files.length === 0) return;
+
+      const dt = new DataTransfer();
+      files.forEach(f => dt.items.add(f));
+      input.files = dt.files;
+
+      thumbGrid.innerHTML = '';
+      files.forEach(file => {
+        const url = URL.createObjectURL(file);
+        const div = document.createElement('div');
+        div.className = 'relative group';
+        div.innerHTML = `
+          <img src="${url}" alt="${file.name}"
+               class="w-full h-16 object-cover rounded-lg border border-gray-200 shadow-sm" />
+          <p class="text-xs text-gray-500 truncate mt-0.5" title="${file.name}">${file.name}</p>`;
+        thumbGrid.appendChild(div);
+      });
+
+      fileCount.textContent = files.length;
+      previewBox.classList.remove('hidden');
+      dropZone.classList.add('hidden');
+    }
+
+    clearBtn.addEventListener('click', () => {
+      input.value = '';
+      thumbGrid.innerHTML = '';
+      previewBox.classList.add('hidden');
+      dropZone.classList.remove('hidden');
+    });
+
+    document.querySelectorAll('.bar-fill[data-width]').forEach(el => {
+      el.style.width = el.dataset.width + '%';
+    });
+
+    form.addEventListener('submit', () => {
+      btnText.classList.add('hidden');
+      btnLoader.classList.remove('hidden');
+    });
+  </script>
+
+</body>
+</html>
