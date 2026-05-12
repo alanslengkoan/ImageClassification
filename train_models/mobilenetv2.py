@@ -295,8 +295,6 @@ history_phase1 = model.fit(
     validation_data=val_generator,
     epochs=PHASE1_EPOCHS,
     callbacks=callbacks_phase1,
-    workers=1,
-    use_multiprocessing=False,
     verbose=1
 )
 
@@ -361,8 +359,6 @@ history_phase2 = model.fit(
     validation_data=val_generator,
     epochs=PHASE2_EPOCHS,
     callbacks=callbacks_phase2,
-    workers=1,
-    use_multiprocessing=False,
     verbose=1
 )
 

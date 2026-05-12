@@ -255,8 +255,6 @@ history_phase1 = model.fit(
     epochs=PHASE1_EPOCHS,
     callbacks=callbacks_phase1,
     class_weight=class_weights_dict,
-    workers=1,
-    use_multiprocessing=False,
     verbose=1
 )
 
@@ -313,8 +311,6 @@ history_phase2 = model.fit(
     epochs=PHASE2_EPOCHS,
     callbacks=callbacks_phase2,
     class_weight=class_weights_dict,
-    workers=1,
-    use_multiprocessing=False,
     verbose=1
 )
 
