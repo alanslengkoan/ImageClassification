@@ -74,13 +74,13 @@ BATCH_SIZE       = 16
 NUM_CLASSES      = 3
 
 # Phase 1: Head only
-PHASE1_EPOCHS    = 25
+PHASE1_EPOCHS    = 30
 PHASE1_LR        = 0.001
 
 # Phase 2: Fine-tune
 PHASE2_EPOCHS    = 80
-PHASE2_LR        = 0.0001
-FINE_TUNE_LAYERS = 80
+PHASE2_LR        = 0.00003
+FINE_TUNE_LAYERS = 20
 
 print('\n============================================================')
 print('⚙️ KONFIGURASI TRAINING')
@@ -99,17 +99,17 @@ print(f'TARGET TEST ACC     : >= 85%')
 train_datagen = ImageDataGenerator(
     preprocessing_function=preprocess_input,
 
-    rotation_range=15,
-    width_shift_range=0.10,
-    height_shift_range=0.10,
+    rotation_range=20,
+    width_shift_range=0.15,
+    height_shift_range=0.15,
 
-    shear_range=0.08,
-    zoom_range=0.10,
+    shear_range=0.10,
+    zoom_range=0.15,
 
     horizontal_flip=True,
     vertical_flip=False,
 
-    brightness_range=[0.90, 1.10],
+    brightness_range=[0.85, 1.15],
 
     fill_mode='nearest'
 )
@@ -201,27 +201,17 @@ x = base_model(inputs, training=False)
 x = layers.GlobalAveragePooling2D()(x)
 
 # ============================================================
-# HEAD MODEL
+# HEAD MODEL (simplified — reduce overfitting)
 # ============================================================
-x = layers.Dense(
-    256,
-    activation='relu',
-    kernel_regularizer=keras.regularizers.l2(0.0003)
-)(x)
-
-x = layers.BatchNormalization()(x)
-
-x = layers.Dropout(0.3)(x)
-
 x = layers.Dense(
     128,
     activation='relu',
-    kernel_regularizer=keras.regularizers.l2(0.0003)
+    kernel_regularizer=keras.regularizers.l2(0.001)
 )(x)
 
 x = layers.BatchNormalization()(x)
 
-x = layers.Dropout(0.2)(x)
+x = layers.Dropout(0.5)(x)
 
 outputs = layers.Dense(
     NUM_CLASSES,
@@ -580,7 +570,7 @@ print(f'Test Accuracy         : {test_acc*100:.2f}%')
 print(f'Test Loss             : {test_loss:.4f}')
 
 print(f'Fine Tune Layers      : {FINE_TUNE_LAYERS}')
-print(f'Dropout               : 0.30 / 0.20')
+print(f'Dropout               : 0.50')
 print(f'Label Smoothing       : 0.10')
 print(f'Strategy              : Two-Phase + TTA')
 
