@@ -32,9 +32,9 @@ BASE_DIR   = '/home/echolog/Documents/Project/www/skripsi/ImageClassification/tr
 TEST_DIR   = os.path.join(BASE_DIR, 'dataset', 'test')
 OUTPUT_DIR = os.path.join(BASE_DIR, 'dataset', 'output')
 
-MODEL_RESNET      = os.path.join(OUTPUT_DIR, 'resnet50_3class_best.h5')
-MODEL_MOBILENET   = os.path.join(OUTPUT_DIR, 'mobilenetv2_target85_best.keras')
-COMPARE_DIR       = os.path.join(OUTPUT_DIR, 'comparison')
+MODEL_RESNET      = os.path.join(OUTPUT_DIR, 'resnet50_single_best.h5')
+MODEL_MOBILENET   = os.path.join(OUTPUT_DIR, 'mobilenetv2_single_best.keras')
+COMPARE_DIR       = os.path.join(OUTPUT_DIR, 'comparison_single')
 
 IMG_SIZE   = (224, 224)
 BATCH_SIZE = 32
@@ -44,7 +44,7 @@ os.makedirs(COMPARE_DIR, exist_ok=True)
 # ============================================================
 # CEK MODEL TERSEDIA
 # ============================================================
-for path, name in [(MODEL_RESNET, 'ResNet50'), (MODEL_MOBILENET, 'MobileNetV2')]:
+for path, name in [(MODEL_RESNET, 'ResNet50 Single'), (MODEL_MOBILENET, 'MobileNetV2 Single')]:
     if not os.path.exists(path):
         raise FileNotFoundError(
             f'Model {name} tidak ditemukan: {path}\n'
@@ -58,8 +58,8 @@ print('✅ Kedua model ditemukan')
 print('\n📦 Loading models...')
 model_resnet    = load_model(MODEL_RESNET)
 model_mobilenet = load_model(MODEL_MOBILENET)
-print('✅ ResNet50 loaded')
-print('✅ MobileNetV2 loaded')
+print('✅ ResNet50 Single loaded')
+print('✅ MobileNetV2 Single loaded')
 
 # ============================================================
 # DATA GENERATOR — masing-masing pakai preprocessing berbeda
@@ -91,14 +91,14 @@ print('\n' + '=' * 60)
 print('📈 EVALUASI TEST SET')
 print('=' * 60)
 
-print('\n🔍 ResNet50...')
+print('\n🔍 ResNet50 Single...')
 gen_resnet.reset()
 loss_resnet, acc_resnet = model_resnet.evaluate(gen_resnet, verbose=0)
 gen_resnet.reset()
 prob_resnet  = model_resnet.predict(gen_resnet, verbose=1)
 pred_resnet  = np.argmax(prob_resnet, axis=1)
 
-print('\n🔍 MobileNetV2...')
+print('\n🔍 MobileNetV2 Single...')
 gen_mobilenet.reset()
 loss_mobilenet, acc_mobilenet = model_mobilenet.evaluate(gen_mobilenet, verbose=0)
 gen_mobilenet.reset()
@@ -108,16 +108,16 @@ pred_mobilenet  = np.argmax(prob_mobilenet, axis=1)
 print(f'\n{"=" * 60}')
 print(f'📊 HASIL PERBANDINGAN:')
 print(f'{"=" * 60}')
-print(f'   {"Model":<20} {"Test Accuracy":>15} {"Test Loss":>12}')
-print(f'   {"-"*47}')
-print(f'   {"ResNet50":<20} {acc_resnet*100:>14.2f}% {loss_resnet:>12.4f}')
-print(f'   {"MobileNetV2":<20} {acc_mobilenet*100:>14.2f}% {loss_mobilenet:>12.4f}')
+print(f'   {"Model":<25} {"Test Accuracy":>15} {"Test Loss":>12}')
+print(f'   {"-"*52}')
+print(f'   {"ResNet50 Single":<25} {acc_resnet*100:>14.2f}% {loss_resnet:>12.4f}')
+print(f'   {"MobileNetV2 Single":<25} {acc_mobilenet*100:>14.2f}% {loss_mobilenet:>12.4f}')
 print(f'{"=" * 60}')
 delta = (acc_mobilenet - acc_resnet) * 100
 if delta > 0:
-    print(f'\n   MobileNetV2 unggul {delta:+.2f}% dibanding ResNet50')
+    print(f'\n   MobileNetV2 Single unggul {delta:+.2f}% dibanding ResNet50 Single')
 elif delta < 0:
-    print(f'\n   ResNet50 unggul {-delta:+.2f}% dibanding MobileNetV2')
+    print(f'\n   ResNet50 Single unggul {-delta:+.2f}% dibanding MobileNetV2 Single')
 else:
     print(f'\n   Kedua model memiliki accuracy yang sama')
 
@@ -125,10 +125,10 @@ else:
 # 1. BAR CHART: Accuracy & Loss Comparison
 # ============================================================
 fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-fig.suptitle('Perbandingan ResNet50 vs MobileNetV2 (Two-Phase)\nKlasifikasi Kerusakan Jalan (3 Kelas)',
+fig.suptitle('Perbandingan ResNet50 vs MobileNetV2 (Single Fine-Tune)\nKlasifikasi Kerusakan Jalan (3 Kelas)',
              fontsize=14, fontweight='bold')
 
-models  = ['ResNet50', 'MobileNetV2']
+models  = ['ResNet50\nSingle', 'MobileNetV2\nSingle']
 colors  = ['#FF9800', '#2196F3']
 accs    = [acc_resnet * 100, acc_mobilenet * 100]
 losses  = [loss_resnet,      loss_mobilenet]
@@ -153,7 +153,7 @@ axes[1].set_ylabel('Loss')
 axes[1].grid(axis='y', alpha=0.3)
 
 plt.tight_layout()
-save_path = os.path.join(COMPARE_DIR, 'comparison_accuracy_loss.png')
+save_path = os.path.join(COMPARE_DIR, 'comparison_single_accuracy_loss.png')
 plt.savefig(save_path, dpi=150, bbox_inches='tight')
 plt.show()
 print(f'\n✅ Grafik accuracy/loss tersimpan: {save_path}')
@@ -162,12 +162,12 @@ print(f'\n✅ Grafik accuracy/loss tersimpan: {save_path}')
 # 2. CONFUSION MATRIX SIDE-BY-SIDE
 # ============================================================
 fig, axes = plt.subplots(1, 2, figsize=(16, 6))
-fig.suptitle('Confusion Matrix — ResNet50 vs MobileNetV2 (Two-Phase)\nKlasifikasi Kerusakan Jalan (3 Kelas)',
+fig.suptitle('Confusion Matrix — ResNet50 vs MobileNetV2 (Single Fine-Tune)\nKlasifikasi Kerusakan Jalan (3 Kelas)',
              fontsize=14, fontweight='bold')
 
 for ax, pred, title, cmap in [
-    (axes[0], pred_resnet,    f'ResNet50      (Acc={acc_resnet*100:.2f}%)',    'Oranges'),
-    (axes[1], pred_mobilenet, f'MobileNetV2   (Acc={acc_mobilenet*100:.2f}%)', 'Blues'),
+    (axes[0], pred_resnet,    f'ResNet50 Single (Acc={acc_resnet*100:.2f}%)',      'Oranges'),
+    (axes[1], pred_mobilenet, f'MobileNetV2 Single (Acc={acc_mobilenet*100:.2f}%)', 'Blues'),
 ]:
     cm = confusion_matrix(y_true, pred)
     sns.heatmap(cm, annot=True, fmt='d', cmap=cmap,
@@ -179,7 +179,7 @@ for ax, pred, title, cmap in [
     ax.tick_params(axis='x', rotation=30)
 
 plt.tight_layout()
-save_path = os.path.join(COMPARE_DIR, 'comparison_confusion_matrix.png')
+save_path = os.path.join(COMPARE_DIR, 'comparison_single_confusion_matrix.png')
 plt.savefig(save_path, dpi=150, bbox_inches='tight')
 plt.show()
 print(f'✅ Confusion matrix tersimpan: {save_path}')
@@ -188,31 +188,31 @@ print(f'✅ Confusion matrix tersimpan: {save_path}')
 # 3. CLASSIFICATION REPORT — keduanya
 # ============================================================
 print('\n' + '=' * 60)
-print('📋 Classification Report — ResNet50')
+print('📋 Classification Report — ResNet50 Single')
 print('=' * 60)
 report_resnet = classification_report(y_true, pred_resnet, target_names=CLASS_LABELS)
 print(report_resnet)
 
 print('=' * 60)
-print('📋 Classification Report — MobileNetV2')
+print('📋 Classification Report — MobileNetV2 Single')
 print('=' * 60)
 report_mobilenet = classification_report(y_true, pred_mobilenet, target_names=CLASS_LABELS)
 print(report_mobilenet)
 
-report_path = os.path.join(COMPARE_DIR, 'comparison_classification_report.txt')
+report_path = os.path.join(COMPARE_DIR, 'comparison_single_classification_report.txt')
 with open(report_path, 'w') as f:
     f.write('=' * 60 + '\n')
-    f.write('PERBANDINGAN MODEL (Two-Phase) — Klasifikasi Kerusakan Jalan (3 Kelas)\n')
+    f.write('PERBANDINGAN MODEL (Single Fine-Tune) — Klasifikasi Kerusakan Jalan (3 Kelas)\n')
     f.write('=' * 60 + '\n\n')
-    f.write(f'ResNet50      — Test Accuracy: {acc_resnet*100:.2f}%  | Test Loss: {loss_resnet:.4f}\n')
-    f.write(f'MobileNetV2   — Test Accuracy: {acc_mobilenet*100:.2f}%  | Test Loss: {loss_mobilenet:.4f}\n')
-    f.write(f'Selisih       — {delta:+.2f}%\n\n')
+    f.write(f'ResNet50 Single      — Test Accuracy: {acc_resnet*100:.2f}%  | Test Loss: {loss_resnet:.4f}\n')
+    f.write(f'MobileNetV2 Single   — Test Accuracy: {acc_mobilenet*100:.2f}%  | Test Loss: {loss_mobilenet:.4f}\n')
+    f.write(f'Selisih              — {delta:+.2f}%\n\n')
     f.write('=' * 60 + '\n')
-    f.write('Classification Report — ResNet50\n')
+    f.write('Classification Report — ResNet50 Single\n')
     f.write('=' * 60 + '\n')
     f.write(report_resnet)
     f.write('\n' + '=' * 60 + '\n')
-    f.write('Classification Report — MobileNetV2\n')
+    f.write('Classification Report — MobileNetV2 Single\n')
     f.write('=' * 60 + '\n')
     f.write(report_mobilenet)
 print(f'✅ Report perbandingan tersimpan: {report_path}')
@@ -224,7 +224,7 @@ y_bin = label_binarize(y_true, classes=list(range(NUM_CLASSES)))
 colors_cls = ['#2196F3', '#F44336', '#4CAF50']
 
 fig, axes = plt.subplots(1, NUM_CLASSES, figsize=(16, 5))
-fig.suptitle('ROC Curve per Kelas — ResNet50 vs MobileNetV2 (Two-Phase)\nKlasifikasi Kerusakan Jalan',
+fig.suptitle('ROC Curve per Kelas — ResNet50 vs MobileNetV2 (Single Fine-Tune)\nKlasifikasi Kerusakan Jalan',
              fontsize=13, fontweight='bold')
 
 for i, (cls, color, ax) in enumerate(zip(CLASS_LABELS, colors_cls, axes)):
@@ -245,7 +245,7 @@ for i, (cls, color, ax) in enumerate(zip(CLASS_LABELS, colors_cls, axes)):
     ax.grid(True, alpha=0.3)
 
 plt.tight_layout()
-save_path = os.path.join(COMPARE_DIR, 'comparison_roc_curve.png')
+save_path = os.path.join(COMPARE_DIR, 'comparison_single_roc_curve.png')
 plt.savefig(save_path, dpi=150, bbox_inches='tight')
 plt.show()
 print(f'✅ ROC Curve tersimpan: {save_path}')
@@ -254,7 +254,7 @@ print(f'✅ ROC Curve tersimpan: {save_path}')
 # 5. PRECISION-RECALL CURVE — keduanya per kelas
 # ============================================================
 fig, axes = plt.subplots(1, NUM_CLASSES, figsize=(16, 5))
-fig.suptitle('Precision-Recall Curve per Kelas — ResNet50 vs MobileNetV2 (Two-Phase)\nKlasifikasi Kerusakan Jalan',
+fig.suptitle('Precision-Recall Curve per Kelas — ResNet50 vs MobileNetV2 (Single Fine-Tune)\nKlasifikasi Kerusakan Jalan',
              fontsize=13, fontweight='bold')
 
 for i, (cls, color, ax) in enumerate(zip(CLASS_LABELS, colors_cls, axes)):
@@ -274,7 +274,7 @@ for i, (cls, color, ax) in enumerate(zip(CLASS_LABELS, colors_cls, axes)):
     ax.grid(True, alpha=0.3)
 
 plt.tight_layout()
-save_path = os.path.join(COMPARE_DIR, 'comparison_pr_curve.png')
+save_path = os.path.join(COMPARE_DIR, 'comparison_single_pr_curve.png')
 plt.savefig(save_path, dpi=150, bbox_inches='tight')
 plt.show()
 print(f'✅ Precision-Recall Curve tersimpan: {save_path}')
@@ -287,7 +287,7 @@ rd_mobilenet = classification_report(y_true, pred_mobilenet, target_names=CLASS_
 
 metrics   = ['precision', 'recall', 'f1-score']
 fig, axes = plt.subplots(1, 3, figsize=(16, 5))
-fig.suptitle('Precision / Recall / F1-Score per Kelas\nResNet50 vs MobileNetV2 (Two-Phase)',
+fig.suptitle('Precision / Recall / F1-Score per Kelas\nResNet50 vs MobileNetV2 (Single Fine-Tune)',
              fontsize=13, fontweight='bold')
 
 x     = np.arange(len(CLASS_LABELS))
@@ -297,8 +297,8 @@ for ax, metric in zip(axes, metrics):
     vals_resnet    = [rd_resnet[c][metric]    for c in CLASS_LABELS]
     vals_mobilenet = [rd_mobilenet[c][metric] for c in CLASS_LABELS]
 
-    b1 = ax.bar(x - width/2, vals_resnet,    width, label='ResNet50',     color='#FF9800', edgecolor='black')
-    b2 = ax.bar(x + width/2, vals_mobilenet, width, label='MobileNetV2',  color='#2196F3', edgecolor='black')
+    b1 = ax.bar(x - width/2, vals_resnet,    width, label='ResNet50 Single',     color='#FF9800', edgecolor='black')
+    b2 = ax.bar(x + width/2, vals_mobilenet, width, label='MobileNetV2 Single',  color='#2196F3', edgecolor='black')
 
     for b in list(b1) + list(b2):
         ax.text(b.get_x() + b.get_width()/2, b.get_height() + 0.01,
@@ -312,7 +312,7 @@ for ax, metric in zip(axes, metrics):
     ax.grid(axis='y', alpha=0.3)
 
 plt.tight_layout()
-save_path = os.path.join(COMPARE_DIR, 'comparison_per_class_metrics.png')
+save_path = os.path.join(COMPARE_DIR, 'comparison_single_per_class_metrics.png')
 plt.savefig(save_path, dpi=150, bbox_inches='tight')
 plt.show()
 print(f'✅ Grafik per kelas tersimpan: {save_path}')
@@ -321,11 +321,12 @@ print(f'✅ Grafik per kelas tersimpan: {save_path}')
 # RINGKASAN AKHIR
 # ============================================================
 print('\n' + '=' * 60)
-print('📋 RINGKASAN PERBANDINGAN MODEL (Two-Phase)')
+print('📋 RINGKASAN PERBANDINGAN MODEL (Single Fine-Tune)')
 print('=' * 60)
 print(f'   {"":25} {"ResNet50":>14} {"MobileNetV2":>14}')
 print(f'   {"-" * 53}')
 print(f'   {"Backbone":<25} {"ResNet50":>14} {"MobileNetV2":>14}')
+print(f'   {"Strategy":<25} {"Single FT":>14} {"Single FT":>14}')
 print(f'   {"Pretrained":<25} {"✅ ImageNet":>14} {"✅ ImageNet":>14}')
 print(f'   {"Test Accuracy":<25} {acc_resnet*100:>13.2f}% {acc_mobilenet*100:>13.2f}%')
 print(f'   {"Test Loss":<25} {loss_resnet:>14.4f} {loss_mobilenet:>14.4f}')

@@ -1,6 +1,6 @@
 # ============================================================
-# MOBILE NET V2 — TARGET 85% TEST ACCURACY
-# Strategi: Two-Phase Training (Head → Fine-Tune)
+# RESNET50 — TARGET 85% TEST ACCURACY
+# Strategi: Single Fine-Tune (langsung fine-tune + head)
 # ============================================================
 
 import os
@@ -23,25 +23,14 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 from tensorflow import keras
 from tensorflow.keras import layers
-from tensorflow.keras.applications import MobileNetV2
-from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
+from tensorflow.keras.applications import ResNet50
+from tensorflow.keras.applications.resnet50 import preprocess_input
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from tensorflow.keras.callbacks import (
-    EarlyStopping,
-    ModelCheckpoint,
-    ReduceLROnPlateau
-)
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 
-from sklearn.metrics import (
-    classification_report,
-    confusion_matrix,
-    roc_curve,
-    auc,
-    precision_recall_curve
-)
-
+from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import roc_curve, auc, precision_recall_curve
 from sklearn.preprocessing import label_binarize
-from sklearn.utils import class_weight
 from itertools import cycle
 
 import warnings
@@ -56,41 +45,34 @@ print('✅ TensorFlow version :', tf.__version__)
 print('✅ GPU tersedia       :', tf.config.list_physical_devices('GPU'))
 
 # ============================================================
-# PATH
+# KONFIGURASI PATH
 # ============================================================
 BASE_DIR   = '/home/echolog/Documents/Project/www/skripsi/ImageClassification/train_models'
-
 TRAIN_DIR  = os.path.join(BASE_DIR, 'dataset', 'train')
 VAL_DIR    = os.path.join(BASE_DIR, 'dataset', 'val')
 TEST_DIR   = os.path.join(BASE_DIR, 'dataset', 'test')
-
 OUTPUT_DIR = os.path.join(BASE_DIR, 'dataset', 'output')
-os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # ============================================================
-# CONFIG
+# KONFIGURASI
 # ============================================================
 IMG_SIZE         = (224, 224)
 BATCH_SIZE       = 16
 NUM_CLASSES      = 3
 
-# Phase 1: Head only
-PHASE1_EPOCHS    = 30
-PHASE1_LR        = 0.001
+# Single Fine-Tune
+EPOCHS           = 80
+LEARNING_RATE    = 0.0001
+FINE_TUNE_LAYERS = 30
 
-# Phase 2: Fine-tune
-PHASE2_EPOCHS    = 80
-PHASE2_LR        = 0.00003
-FINE_TUNE_LAYERS = 20
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 print('\n============================================================')
 print('⚙️ KONFIGURASI TRAINING')
 print('============================================================')
-
 print(f'IMG_SIZE            : {IMG_SIZE}')
 print(f'BATCH_SIZE          : {BATCH_SIZE}')
-print(f'Phase 1 Epochs      : {PHASE1_EPOCHS} (head only, LR={PHASE1_LR})')
-print(f'Phase 2 Epochs      : {PHASE2_EPOCHS} (fine-tune, LR={PHASE2_LR})')
+print(f'Epochs              : {EPOCHS} (single fine-tune, LR={LEARNING_RATE})')
 print(f'FINE_TUNE_LAYERS    : {FINE_TUNE_LAYERS}')
 print(f'TARGET TEST ACC     : >= 85%')
 
@@ -99,25 +81,18 @@ print(f'TARGET TEST ACC     : >= 85%')
 # ============================================================
 train_datagen = ImageDataGenerator(
     preprocessing_function=preprocess_input,
-
-    rotation_range=20,
+    rotation_range=25,
     width_shift_range=0.15,
     height_shift_range=0.15,
-
-    shear_range=0.10,
-    zoom_range=0.15,
-
+    shear_range=0.12,
+    zoom_range=0.20,
     horizontal_flip=True,
     vertical_flip=False,
-
     brightness_range=[0.85, 1.15],
-
     fill_mode='nearest'
 )
 
-val_test_datagen = ImageDataGenerator(
-    preprocessing_function=preprocess_input
-)
+val_test_datagen = ImageDataGenerator(preprocessing_function=preprocess_input)
 
 # TTA augmentation (lighter)
 tta_datagen = ImageDataGenerator(
@@ -130,9 +105,6 @@ tta_datagen = ImageDataGenerator(
     fill_mode='nearest'
 )
 
-# ============================================================
-# GENERATOR
-# ============================================================
 train_generator = train_datagen.flow_from_directory(
     TRAIN_DIR,
     target_size=IMG_SIZE,
@@ -164,177 +136,92 @@ CLASS_LABELS = [c.title() for c in CLASS_NAMES]
 print('\n============================================================')
 print('📊 DATASET')
 print('============================================================')
-
 print(f'Train : {train_generator.samples}')
 print(f'Val   : {val_generator.samples}')
 print(f'Test  : {test_generator.samples}')
 print(f'Class : {CLASS_LABELS}')
 
 # ============================================================
-# BASE MODEL — PHASE 1: FREEZE ALL
+# BASE MODEL — SINGLE FINE-TUNE
 # ============================================================
-base_model = MobileNetV2(
+base_model = ResNet50(
     weights='imagenet',
     include_top=False,
     input_shape=(224, 224, 3)
 )
 
-# Phase 1: freeze all base_model
-base_model.trainable = False
+# Langsung unfreeze last FINE_TUNE_LAYERS
+base_model.trainable = True
+for layer in base_model.layers[:-FINE_TUNE_LAYERS]:
+    layer.trainable = False
+
+trainable_count = sum(1 for l in base_model.layers if l.trainable)
+frozen_count    = sum(1 for l in base_model.layers if not l.trainable)
 
 print('\n============================================================')
 print('📊 BASE MODEL')
 print('============================================================')
-
 print(f'Total Layer     : {len(base_model.layers)}')
-print(f'Phase 1         : All frozen (train head only, LR={PHASE1_LR})')
-print(f'Phase 2         : Fine-tune last {FINE_TUNE_LAYERS} layers (LR={PHASE2_LR})')
+print(f'Frozen Layers   : {frozen_count}')
+print(f'Trainable Layers: {trainable_count} (last {FINE_TUNE_LAYERS})')
+print(f'Strategy        : Single Fine-Tune (LR={LEARNING_RATE})')
 
 # ============================================================
 # MODEL
 # ============================================================
 inputs = keras.Input(shape=(224, 224, 3))
 
-# PENTING:
-# training=False agar BatchNorm stabil
 x = base_model(inputs, training=False)
 
 x = layers.GlobalAveragePooling2D()(x)
 
 # ============================================================
-# HEAD MODEL (simplified — reduce overfitting)
+# HEAD MODEL (simplified — anti overfitting)
 # ============================================================
+x = layers.BatchNormalization()(x)
+
 x = layers.Dense(
     128,
     activation='relu',
     kernel_regularizer=keras.regularizers.l2(0.001)
 )(x)
 
-x = layers.BatchNormalization()(x)
-
 x = layers.Dropout(0.5)(x)
 
-outputs = layers.Dense(
-    NUM_CLASSES,
-    activation='softmax'
-)(x)
+outputs = layers.Dense(NUM_CLASSES, activation='softmax')(x)
 
 model = keras.Model(inputs, outputs)
-
 model.summary()
 
 # ============================================================
-# COMPILE — PHASE 1 (HEAD ONLY)
+# COMPILE
 # ============================================================
+model_save_path = os.path.join(OUTPUT_DIR, 'resnet50_single_best.h5')
+
 model.compile(
-    optimizer=tf.keras.optimizers.Adam(
-        learning_rate=PHASE1_LR
-    ),
-
-    loss=tf.keras.losses.CategoricalCrossentropy(
-        label_smoothing=0.10
-    ),
-
+    optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE),
+    loss=tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.1),
     metrics=['accuracy']
 )
 
-print('\n✅ Model berhasil dikompilasi (Phase 1 — Head Only)')
+print('\n✅ Model berhasil dikompilasi (Single Fine-Tune)')
 
 # ============================================================
-# CALLBACKS — PHASE 1
+# CALLBACKS
 # ============================================================
-model_save_path = os.path.join(
-    OUTPUT_DIR,
-    'mobilenetv2_target85_best.keras'
-)
-
-callbacks_phase1 = [
-
+callbacks = [
     EarlyStopping(
         monitor='val_accuracy',
-        patience=10,
+        patience=15,
         restore_best_weights=True,
         verbose=1
     ),
-
     ModelCheckpoint(
         model_save_path,
         monitor='val_accuracy',
         save_best_only=True,
         verbose=1
     ),
-
-    ReduceLROnPlateau(
-        monitor='val_loss',
-        factor=0.5,
-        patience=3,
-        min_lr=1e-6,
-        verbose=1
-    )
-]
-
-# ============================================================
-# PHASE 1 — TRAIN HEAD ONLY
-# ============================================================
-print('\n============================================================')
-print('🚀 PHASE 1 — TRAIN HEAD ONLY')
-print('============================================================')
-
-history_phase1 = model.fit(
-    train_generator,
-    validation_data=val_generator,
-    epochs=PHASE1_EPOCHS,
-    callbacks=callbacks_phase1,
-    verbose=1
-)
-
-print('\n✅ Phase 1 selesai')
-print(f'Best Val Accuracy Phase 1: {max(history_phase1.history["val_accuracy"])*100:.2f}%')
-
-# ============================================================
-# PHASE 2 — FINE-TUNE DEEPER LAYERS
-# ============================================================
-print('\n============================================================')
-print('🚀 PHASE 2 — FINE-TUNE LAST', FINE_TUNE_LAYERS, 'LAYERS')
-print('============================================================')
-
-# Unfreeze last FINE_TUNE_LAYERS
-base_model.trainable = True
-for layer in base_model.layers[:-FINE_TUNE_LAYERS]:
-    layer.trainable = False
-
-trainable_count = sum(1 for l in base_model.layers if l.trainable)
-print(f'Trainable layers di base_model: {trainable_count}')
-
-# Re-compile dengan LR rendah
-model.compile(
-    optimizer=tf.keras.optimizers.Adam(
-        learning_rate=PHASE2_LR
-    ),
-
-    loss=tf.keras.losses.CategoricalCrossentropy(
-        label_smoothing=0.10
-    ),
-
-    metrics=['accuracy']
-)
-
-callbacks_phase2 = [
-
-    EarlyStopping(
-        monitor='val_accuracy',
-        patience=20,
-        restore_best_weights=True,
-        verbose=1
-    ),
-
-    ModelCheckpoint(
-        model_save_path,
-        monitor='val_accuracy',
-        save_best_only=True,
-        verbose=1
-    ),
-
     ReduceLROnPlateau(
         monitor='val_loss',
         factor=0.5,
@@ -344,81 +231,71 @@ callbacks_phase2 = [
     )
 ]
 
-history_phase2 = model.fit(
+# ============================================================
+# TRAINING — SINGLE FINE-TUNE
+# ============================================================
+print('\n============================================================')
+print('🚀 TRAINING — SINGLE FINE-TUNE')
+print('============================================================')
+
+history_obj = model.fit(
     train_generator,
     validation_data=val_generator,
-    epochs=PHASE2_EPOCHS,
-    callbacks=callbacks_phase2,
+    epochs=EPOCHS,
+    callbacks=callbacks,
     verbose=1
 )
 
-# Gabungkan history
-history = {}
-for key in history_phase1.history:
-    history[key] = history_phase1.history[key] + history_phase2.history[key]
+history = history_obj.history
+
+print('\n✅ Training selesai')
+print(f'Best Val Accuracy: {max(history["val_accuracy"])*100:.2f}%')
 
 # ============================================================
 # HASIL TRAINING
 # ============================================================
 best_val_acc = max(history['val_accuracy'])
-best_val_acc_p1 = max(history_phase1.history['val_accuracy'])
-best_val_acc_p2 = max(history_phase2.history['val_accuracy'])
 
 print('\n============================================================')
 print('📊 HASIL TRAINING')
 print('============================================================')
-
-print(f'Best Val Accuracy Phase 1 : {best_val_acc_p1*100:.2f}%')
-print(f'Best Val Accuracy Phase 2 : {best_val_acc_p2*100:.2f}%')
-print(f'Best Val Accuracy Overall : {best_val_acc*100:.2f}%')
+print(f'Best Val Accuracy : {best_val_acc*100:.2f}%')
+print(f'Total Epochs Run  : {len(history["accuracy"])}')
 
 # ============================================================
-# VISUALISASI
+# VISUALISASI TRAINING HISTORY
 # ============================================================
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+fig.suptitle('ResNet50 Single Fine-Tune — Klasifikasi Kerusakan Jalan (3 Kelas)\n'
+             f'(Fine-tune {FINE_TUNE_LAYERS} Layer, Batch {BATCH_SIZE}, LR={LEARNING_RATE})',
+             fontsize=13, fontweight='bold')
 
-ax1.plot(history['accuracy'], label='Train')
-ax1.plot(history['val_accuracy'], label='Validation')
+ax1.plot(history['accuracy'],     label='Train', color='#2196F3', linewidth=2)
+ax1.plot(history['val_accuracy'], label='Val',   color='#FF5722', linewidth=2, linestyle='--')
+ax1.axhline(y=0.85, color='green', linewidth=1.5, linestyle=':', label='Target 85%')
+ax1.set_title('Accuracy'); ax1.set_xlabel('Epoch'); ax1.set_ylabel('Accuracy')
+ax1.legend(); ax1.grid(True, alpha=0.3); ax1.set_ylim(0, 1.05)
 
-ax1.axhline(y=0.85, color='green', linestyle='--', label='Target 85%')
-ax1.axvline(x=len(history_phase1.history['accuracy'])-1, color='gray', linestyle=':', alpha=0.7, label='Phase 1→2')
-
-ax1.set_title('Accuracy')
-ax1.legend()
-ax1.grid(True)
-
-ax2.plot(history['loss'], label='Train')
-ax2.plot(history['val_loss'], label='Validation')
-ax2.axvline(x=len(history_phase1.history['loss'])-1, color='gray', linestyle=':', alpha=0.7, label='Phase 1→2')
-
-ax2.set_title('Loss')
-ax2.legend()
-ax2.grid(True)
+ax2.plot(history['loss'],     label='Train', color='#2196F3', linewidth=2)
+ax2.plot(history['val_loss'], label='Val',   color='#FF5722', linewidth=2, linestyle='--')
+ax2.set_title('Loss'); ax2.set_xlabel('Epoch'); ax2.set_ylabel('Loss')
+ax2.legend(); ax2.grid(True, alpha=0.3)
 
 plt.tight_layout()
-
-save_path = os.path.join(
-    OUTPUT_DIR,
-    'mobilenetv2_target85_history.png'
-)
-
-plt.savefig(save_path, dpi=150)
+save_path = os.path.join(OUTPUT_DIR, 'resnet50_single_history.png')
+plt.savefig(save_path, dpi=150, bbox_inches='tight')
 plt.show()
-
-print(f'✅ Grafik tersimpan: {save_path}')
+print(f'✅ Grafik training tersimpan: {save_path}')
 
 # ============================================================
 # EVALUASI TEST SET
 # ============================================================
 print('\n============================================================')
-print('� EVALUASI TEST SET')
+print('🔍 EVALUASI TEST SET')
 print('============================================================')
 
 test_generator.reset()
-test_loss, test_acc = model.evaluate(
-    test_generator,
-    verbose=1
-)
+test_loss, test_acc = model.evaluate(test_generator, verbose=1)
 
 print(f'\n🏆 Test Accuracy (standard) : {test_acc*100:.2f}%')
 print(f'📉 Test Loss                : {test_loss:.4f}')
@@ -463,34 +340,19 @@ test_acc = tta_acc
 # CONFUSION MATRIX
 # ============================================================
 cm = confusion_matrix(y_true, y_pred)
-
-plt.figure(figsize=(7, 5))
-
-sns.heatmap(
-    cm,
-    annot=True,
-    fmt='d',
-    cmap='Greens',
-    xticklabels=CLASS_LABELS,
-    yticklabels=CLASS_LABELS
-)
-
-plt.title('Confusion Matrix')
-
-plt.xlabel('Prediksi')
-plt.ylabel('Aktual')
-
+plt.figure(figsize=(8, 6))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+            xticklabels=CLASS_LABELS, yticklabels=CLASS_LABELS,
+            linewidths=0.5, annot_kws={'size': 12})
+plt.title('Confusion Matrix — ResNet50 Single Fine-Tune\nKlasifikasi Kerusakan Jalan',
+          fontsize=13, fontweight='bold', pad=15)
+plt.ylabel('Aktual', fontsize=12); plt.xlabel('Prediksi', fontsize=12)
+plt.xticks(rotation=30, ha='right')
 plt.tight_layout()
-
-save_path = os.path.join(
-    OUTPUT_DIR,
-    'mobilenetv2_target85_confusion_matrix.png'
-)
-
-plt.savefig(save_path, dpi=150)
+save_path = os.path.join(OUTPUT_DIR, 'resnet50_single_confusion_matrix.png')
+plt.savefig(save_path, dpi=150, bbox_inches='tight')
 plt.show()
-
-print(f'✅ Confusion Matrix tersimpan: {save_path}')
+print(f'✅ Confusion matrix tersimpan: {save_path}')
 
 # ============================================================
 # CLASSIFICATION REPORT
@@ -498,18 +360,12 @@ print(f'✅ Confusion Matrix tersimpan: {save_path}')
 print('\n============================================================')
 print('📋 CLASSIFICATION REPORT')
 print('============================================================')
-
-report = classification_report(
-    y_true,
-    y_pred,
-    target_names=CLASS_LABELS
-)
-
+report = classification_report(y_true, y_pred, target_names=CLASS_LABELS)
 print(report)
 
-report_path = os.path.join(OUTPUT_DIR, 'mobilenetv2_target85_classification_report.txt')
+report_path = os.path.join(OUTPUT_DIR, 'resnet50_single_classification_report.txt')
 with open(report_path, 'w') as f:
-    f.write('Classification Report — MobileNetV2 Two-Phase + TTA\n')
+    f.write('Classification Report — ResNet50 Single Fine-Tune + TTA\n')
     f.write('Task      : Klasifikasi Kerusakan Jalan\n')
     f.write('Kelas     : Baik | Sedang | Berat\n')
     f.write('='*60 + '\n')
@@ -521,96 +377,47 @@ print(f'✅ Report tersimpan: {report_path}')
 # ============================================================
 # ROC CURVE
 # ============================================================
-y_bin = label_binarize(
-    y_true,
-    classes=list(range(NUM_CLASSES))
-)
-
+y_bin = label_binarize(y_true, classes=list(range(NUM_CLASSES)))
 plt.figure(figsize=(9, 6))
-
-colors = cycle(['blue', 'red', 'green'])
-
+colors = cycle(['#2196F3', '#F44336', '#4CAF50', '#FF9800'])
 for i, (color, cls) in enumerate(zip(colors, CLASS_LABELS)):
-
-    fpr, tpr, _ = roc_curve(
-        y_bin[:, i],
-        y_pred_prob[:, i]
-    )
-
+    fpr, tpr, _ = roc_curve(y_bin[:, i], y_pred_prob[:, i])
     roc_auc = auc(fpr, tpr)
-
-    plt.plot(
-        fpr,
-        tpr,
-        color=color,
-        linewidth=2,
-        label=f'{cls} (AUC = {roc_auc:.2f})'
-    )
-
-plt.plot([0, 1], [0, 1], 'k--')
-
-plt.title('ROC Curve')
-
-plt.xlabel('False Positive Rate')
-plt.ylabel('True Positive Rate')
-
-plt.legend()
-plt.grid(True)
-
+    plt.plot(fpr, tpr, color=color, linewidth=2,
+             label=f'{cls} (AUC = {roc_auc:.2f})')
+plt.plot([0, 1], [0, 1], 'k--', linewidth=1)
+plt.title('ROC Curve — ResNet50 Single Fine-Tune + TTA\nKlasifikasi Kerusakan Jalan',
+          fontsize=13, fontweight='bold')
+plt.xlabel('False Positive Rate', fontsize=12)
+plt.ylabel('True Positive Rate', fontsize=12)
+plt.legend(loc='lower right', fontsize=10)
+plt.grid(True, alpha=0.3)
 plt.tight_layout()
-
-save_path = os.path.join(
-    OUTPUT_DIR,
-    'mobilenetv2_target85_roc_curve.png'
-)
-
-plt.savefig(save_path, dpi=150)
+save_path = os.path.join(OUTPUT_DIR, 'resnet50_single_roc_curve.png')
+plt.savefig(save_path, dpi=150, bbox_inches='tight')
 plt.show()
-
 print(f'✅ ROC Curve tersimpan: {save_path}')
 
 # ============================================================
 # PRECISION-RECALL CURVE
 # ============================================================
 plt.figure(figsize=(9, 6))
-
-colors = cycle(['blue', 'red', 'green'])
-
+colors = cycle(['#2196F3', '#F44336', '#4CAF50', '#FF9800'])
 for i, (color, cls) in enumerate(zip(colors, CLASS_LABELS)):
-
-    precision_vals, recall_vals, _ = precision_recall_curve(
-        y_bin[:, i],
-        y_pred_prob[:, i]
-    )
-
-    pr_auc = auc(recall_vals, precision_vals)
-
-    plt.plot(
-        recall_vals,
-        precision_vals,
-        color=color,
-        linewidth=2,
-        label=f'{cls} (AUC = {pr_auc:.2f})'
-    )
-
-plt.title('Precision-Recall Curve — MobileNetV2 Two-Phase + TTA')
-
-plt.xlabel('Recall')
-plt.ylabel('Precision')
-
-plt.legend()
-plt.grid(True)
-
+    precision, recall, _ = precision_recall_curve(y_bin[:, i], y_pred_prob[:, i])
+    pr_auc = auc(recall, precision)
+    plt.plot(recall, precision, color=color, linewidth=2,
+             label=f'{cls} (AUC = {pr_auc:.2f})')
+plt.title('Precision-Recall Curve — ResNet50 Single Fine-Tune + TTA\nKlasifikasi Kerusakan Jalan',
+          fontsize=13, fontweight='bold')
+plt.xlabel('Recall', fontsize=12)
+plt.ylabel('Precision', fontsize=12)
+plt.legend(loc='lower left', fontsize=10)
+plt.grid(True, alpha=0.3)
 plt.tight_layout()
-
-save_path = os.path.join(
-    OUTPUT_DIR,
-    'mobilenetv2_target85_pr_curve.png'
-)
-
-plt.savefig(save_path, dpi=150)
+save_path = os.path.join(OUTPUT_DIR, 'resnet50_single_pr_curve.png')
+plt.savefig(save_path, dpi=150, bbox_inches='tight')
 plt.show()
-
 print(f'✅ Precision-Recall Curve tersimpan: {save_path}')
 
 # ============================================================
@@ -621,23 +428,23 @@ precision_list = [report_dict[c]['precision'] for c in CLASS_LABELS]
 recall_list    = [report_dict[c]['recall']    for c in CLASS_LABELS]
 f1_list        = [report_dict[c]['f1-score']  for c in CLASS_LABELS]
 
-x_pos, width = np.arange(len(CLASS_LABELS)), 0.25
+x, width = np.arange(len(CLASS_LABELS)), 0.25
 fig, ax = plt.subplots(figsize=(11, 6))
-b1 = ax.bar(x_pos - width, precision_list, width, label='Precision', color='#2196F3', edgecolor='black')
-b2 = ax.bar(x_pos,         recall_list,    width, label='Recall',    color='#4CAF50', edgecolor='black')
-b3 = ax.bar(x_pos + width, f1_list,        width, label='F1-Score',  color='#FF5722', edgecolor='black')
+b1 = ax.bar(x - width, precision_list, width, label='Precision', color='#2196F3', edgecolor='black')
+b2 = ax.bar(x,         recall_list,    width, label='Recall',    color='#4CAF50', edgecolor='black')
+b3 = ax.bar(x + width, f1_list,        width, label='F1-Score',  color='#FF5722', edgecolor='black')
 for bars in [b1, b2, b3]:
     for b in bars:
         ax.text(b.get_x() + b.get_width()/2, b.get_height() + 0.01,
                 f'{b.get_height():.2f}', ha='center', va='bottom', fontsize=9)
 ax.set_xlabel('Kelas Kerusakan Jalan', fontsize=12)
 ax.set_ylabel('Score', fontsize=12)
-ax.set_title('Precision, Recall & F1-Score per Kelas\nMobileNetV2 Two-Phase + TTA — Klasifikasi Kerusakan Jalan',
+ax.set_title('Precision, Recall & F1-Score per Kelas\nResNet50 Single Fine-Tune + TTA — Klasifikasi Kerusakan Jalan',
              fontsize=13, fontweight='bold')
-ax.set_xticks(x_pos); ax.set_xticklabels(CLASS_LABELS)
+ax.set_xticks(x); ax.set_xticklabels(CLASS_LABELS)
 ax.set_ylim(0, 1.2); ax.legend(); ax.grid(axis='y', alpha=0.3)
 plt.tight_layout()
-save_path = os.path.join(OUTPUT_DIR, 'mobilenetv2_target85_per_class_metrics.png')
+save_path = os.path.join(OUTPUT_DIR, 'resnet50_single_per_class_metrics.png')
 plt.savefig(save_path, dpi=150, bbox_inches='tight')
 plt.show()
 print(f'✅ Grafik per kelas tersimpan: {save_path}')
@@ -648,19 +455,15 @@ print(f'✅ Grafik per kelas tersimpan: {save_path}')
 print('\n============================================================')
 print('📋 RINGKASAN AKHIR')
 print('============================================================')
-
-print(f'Backbone              : MobileNetV2')
+print(f'Backbone              : ResNet50')
 print(f'Best Val Accuracy     : {best_val_acc*100:.2f}%')
 print(f'Test Accuracy         : {test_acc*100:.2f}%')
 print(f'Test Loss             : {test_loss:.4f}')
-
 print(f'Fine Tune Layers      : {FINE_TUNE_LAYERS}')
 print(f'Dropout               : 0.50')
 print(f'Label Smoothing       : 0.10')
-print(f'Strategy              : Two-Phase + TTA')
-
-print(f'Model Saved           : mobilenetv2_target85_best.keras')
-
+print(f'Strategy              : Single Fine-Tune + TTA')
+print(f'Model Saved           : resnet50_single_best.h5')
 print('============================================================')
 
 if test_acc >= 0.85:

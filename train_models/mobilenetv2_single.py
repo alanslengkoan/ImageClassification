@@ -1,6 +1,6 @@
 # ============================================================
 # MOBILE NET V2 — TARGET 85% TEST ACCURACY
-# Strategi: Two-Phase Training (Head → Fine-Tune)
+# Strategi: Single Fine-Tune (langsung fine-tune + head)
 # ============================================================
 
 import os
@@ -41,7 +41,6 @@ from sklearn.metrics import (
 )
 
 from sklearn.preprocessing import label_binarize
-from sklearn.utils import class_weight
 from itertools import cycle
 
 import warnings
@@ -74,13 +73,9 @@ IMG_SIZE         = (224, 224)
 BATCH_SIZE       = 16
 NUM_CLASSES      = 3
 
-# Phase 1: Head only
-PHASE1_EPOCHS    = 30
-PHASE1_LR        = 0.001
-
-# Phase 2: Fine-tune
-PHASE2_EPOCHS    = 80
-PHASE2_LR        = 0.00003
+# Single Fine-Tune
+EPOCHS           = 80
+LEARNING_RATE    = 0.0001
 FINE_TUNE_LAYERS = 20
 
 print('\n============================================================')
@@ -89,8 +84,7 @@ print('============================================================')
 
 print(f'IMG_SIZE            : {IMG_SIZE}')
 print(f'BATCH_SIZE          : {BATCH_SIZE}')
-print(f'Phase 1 Epochs      : {PHASE1_EPOCHS} (head only, LR={PHASE1_LR})')
-print(f'Phase 2 Epochs      : {PHASE2_EPOCHS} (fine-tune, LR={PHASE2_LR})')
+print(f'Epochs              : {EPOCHS} (single fine-tune, LR={LEARNING_RATE})')
 print(f'FINE_TUNE_LAYERS    : {FINE_TUNE_LAYERS}')
 print(f'TARGET TEST ACC     : >= 85%')
 
@@ -171,7 +165,7 @@ print(f'Test  : {test_generator.samples}')
 print(f'Class : {CLASS_LABELS}')
 
 # ============================================================
-# BASE MODEL — PHASE 1: FREEZE ALL
+# BASE MODEL — SINGLE FINE-TUNE
 # ============================================================
 base_model = MobileNetV2(
     weights='imagenet',
@@ -179,23 +173,28 @@ base_model = MobileNetV2(
     input_shape=(224, 224, 3)
 )
 
-# Phase 1: freeze all base_model
-base_model.trainable = False
+# Langsung unfreeze last FINE_TUNE_LAYERS
+base_model.trainable = True
+for layer in base_model.layers[:-FINE_TUNE_LAYERS]:
+    layer.trainable = False
+
+trainable_count = sum(1 for l in base_model.layers if l.trainable)
+frozen_count    = sum(1 for l in base_model.layers if not l.trainable)
 
 print('\n============================================================')
 print('📊 BASE MODEL')
 print('============================================================')
 
 print(f'Total Layer     : {len(base_model.layers)}')
-print(f'Phase 1         : All frozen (train head only, LR={PHASE1_LR})')
-print(f'Phase 2         : Fine-tune last {FINE_TUNE_LAYERS} layers (LR={PHASE2_LR})')
+print(f'Frozen Layers   : {frozen_count}')
+print(f'Trainable Layers: {trainable_count} (last {FINE_TUNE_LAYERS})')
+print(f'Strategy        : Single Fine-Tune (LR={LEARNING_RATE})')
 
 # ============================================================
 # MODEL
 # ============================================================
 inputs = keras.Input(shape=(224, 224, 3))
 
-# PENTING:
 # training=False agar BatchNorm stabil
 x = base_model(inputs, training=False)
 
@@ -224,11 +223,11 @@ model = keras.Model(inputs, outputs)
 model.summary()
 
 # ============================================================
-# COMPILE — PHASE 1 (HEAD ONLY)
+# COMPILE
 # ============================================================
 model.compile(
     optimizer=tf.keras.optimizers.Adam(
-        learning_rate=PHASE1_LR
+        learning_rate=LEARNING_RATE
     ),
 
     loss=tf.keras.losses.CategoricalCrossentropy(
@@ -238,92 +237,21 @@ model.compile(
     metrics=['accuracy']
 )
 
-print('\n✅ Model berhasil dikompilasi (Phase 1 — Head Only)')
+print('\n✅ Model berhasil dikompilasi (Single Fine-Tune)')
 
 # ============================================================
-# CALLBACKS — PHASE 1
+# CALLBACKS
 # ============================================================
 model_save_path = os.path.join(
     OUTPUT_DIR,
-    'mobilenetv2_target85_best.keras'
+    'mobilenetv2_single_best.keras'
 )
 
-callbacks_phase1 = [
+callbacks = [
 
     EarlyStopping(
         monitor='val_accuracy',
-        patience=10,
-        restore_best_weights=True,
-        verbose=1
-    ),
-
-    ModelCheckpoint(
-        model_save_path,
-        monitor='val_accuracy',
-        save_best_only=True,
-        verbose=1
-    ),
-
-    ReduceLROnPlateau(
-        monitor='val_loss',
-        factor=0.5,
-        patience=3,
-        min_lr=1e-6,
-        verbose=1
-    )
-]
-
-# ============================================================
-# PHASE 1 — TRAIN HEAD ONLY
-# ============================================================
-print('\n============================================================')
-print('🚀 PHASE 1 — TRAIN HEAD ONLY')
-print('============================================================')
-
-history_phase1 = model.fit(
-    train_generator,
-    validation_data=val_generator,
-    epochs=PHASE1_EPOCHS,
-    callbacks=callbacks_phase1,
-    verbose=1
-)
-
-print('\n✅ Phase 1 selesai')
-print(f'Best Val Accuracy Phase 1: {max(history_phase1.history["val_accuracy"])*100:.2f}%')
-
-# ============================================================
-# PHASE 2 — FINE-TUNE DEEPER LAYERS
-# ============================================================
-print('\n============================================================')
-print('🚀 PHASE 2 — FINE-TUNE LAST', FINE_TUNE_LAYERS, 'LAYERS')
-print('============================================================')
-
-# Unfreeze last FINE_TUNE_LAYERS
-base_model.trainable = True
-for layer in base_model.layers[:-FINE_TUNE_LAYERS]:
-    layer.trainable = False
-
-trainable_count = sum(1 for l in base_model.layers if l.trainable)
-print(f'Trainable layers di base_model: {trainable_count}')
-
-# Re-compile dengan LR rendah
-model.compile(
-    optimizer=tf.keras.optimizers.Adam(
-        learning_rate=PHASE2_LR
-    ),
-
-    loss=tf.keras.losses.CategoricalCrossentropy(
-        label_smoothing=0.10
-    ),
-
-    metrics=['accuracy']
-)
-
-callbacks_phase2 = [
-
-    EarlyStopping(
-        monitor='val_accuracy',
-        patience=20,
+        patience=15,
         restore_best_weights=True,
         verbose=1
     ),
@@ -344,33 +272,37 @@ callbacks_phase2 = [
     )
 ]
 
-history_phase2 = model.fit(
+# ============================================================
+# TRAINING — SINGLE FINE-TUNE
+# ============================================================
+print('\n============================================================')
+print('🚀 TRAINING — SINGLE FINE-TUNE')
+print('============================================================')
+
+history_obj = model.fit(
     train_generator,
     validation_data=val_generator,
-    epochs=PHASE2_EPOCHS,
-    callbacks=callbacks_phase2,
+    epochs=EPOCHS,
+    callbacks=callbacks,
     verbose=1
 )
 
-# Gabungkan history
-history = {}
-for key in history_phase1.history:
-    history[key] = history_phase1.history[key] + history_phase2.history[key]
+history = history_obj.history
+
+print('\n✅ Training selesai')
+print(f'Best Val Accuracy: {max(history["val_accuracy"])*100:.2f}%')
 
 # ============================================================
 # HASIL TRAINING
 # ============================================================
 best_val_acc = max(history['val_accuracy'])
-best_val_acc_p1 = max(history_phase1.history['val_accuracy'])
-best_val_acc_p2 = max(history_phase2.history['val_accuracy'])
 
 print('\n============================================================')
 print('📊 HASIL TRAINING')
 print('============================================================')
 
-print(f'Best Val Accuracy Phase 1 : {best_val_acc_p1*100:.2f}%')
-print(f'Best Val Accuracy Phase 2 : {best_val_acc_p2*100:.2f}%')
-print(f'Best Val Accuracy Overall : {best_val_acc*100:.2f}%')
+print(f'Best Val Accuracy : {best_val_acc*100:.2f}%')
+print(f'Total Epochs Run  : {len(history["accuracy"])}')
 
 # ============================================================
 # VISUALISASI
@@ -381,7 +313,6 @@ ax1.plot(history['accuracy'], label='Train')
 ax1.plot(history['val_accuracy'], label='Validation')
 
 ax1.axhline(y=0.85, color='green', linestyle='--', label='Target 85%')
-ax1.axvline(x=len(history_phase1.history['accuracy'])-1, color='gray', linestyle=':', alpha=0.7, label='Phase 1→2')
 
 ax1.set_title('Accuracy')
 ax1.legend()
@@ -389,7 +320,6 @@ ax1.grid(True)
 
 ax2.plot(history['loss'], label='Train')
 ax2.plot(history['val_loss'], label='Validation')
-ax2.axvline(x=len(history_phase1.history['loss'])-1, color='gray', linestyle=':', alpha=0.7, label='Phase 1→2')
 
 ax2.set_title('Loss')
 ax2.legend()
@@ -399,7 +329,7 @@ plt.tight_layout()
 
 save_path = os.path.join(
     OUTPUT_DIR,
-    'mobilenetv2_target85_history.png'
+    'mobilenetv2_single_history.png'
 )
 
 plt.savefig(save_path, dpi=150)
@@ -411,7 +341,7 @@ print(f'✅ Grafik tersimpan: {save_path}')
 # EVALUASI TEST SET
 # ============================================================
 print('\n============================================================')
-print('� EVALUASI TEST SET')
+print('🔍 EVALUASI TEST SET')
 print('============================================================')
 
 test_generator.reset()
@@ -475,7 +405,7 @@ sns.heatmap(
     yticklabels=CLASS_LABELS
 )
 
-plt.title('Confusion Matrix')
+plt.title('Confusion Matrix — MobileNetV2 Single Fine-Tune')
 
 plt.xlabel('Prediksi')
 plt.ylabel('Aktual')
@@ -484,7 +414,7 @@ plt.tight_layout()
 
 save_path = os.path.join(
     OUTPUT_DIR,
-    'mobilenetv2_target85_confusion_matrix.png'
+    'mobilenetv2_single_confusion_matrix.png'
 )
 
 plt.savefig(save_path, dpi=150)
@@ -507,9 +437,9 @@ report = classification_report(
 
 print(report)
 
-report_path = os.path.join(OUTPUT_DIR, 'mobilenetv2_target85_classification_report.txt')
+report_path = os.path.join(OUTPUT_DIR, 'mobilenetv2_single_classification_report.txt')
 with open(report_path, 'w') as f:
-    f.write('Classification Report — MobileNetV2 Two-Phase + TTA\n')
+    f.write('Classification Report — MobileNetV2 Single Fine-Tune + TTA\n')
     f.write('Task      : Klasifikasi Kerusakan Jalan\n')
     f.write('Kelas     : Baik | Sedang | Berat\n')
     f.write('='*60 + '\n')
@@ -549,7 +479,7 @@ for i, (color, cls) in enumerate(zip(colors, CLASS_LABELS)):
 
 plt.plot([0, 1], [0, 1], 'k--')
 
-plt.title('ROC Curve')
+plt.title('ROC Curve — MobileNetV2 Single Fine-Tune')
 
 plt.xlabel('False Positive Rate')
 plt.ylabel('True Positive Rate')
@@ -561,7 +491,7 @@ plt.tight_layout()
 
 save_path = os.path.join(
     OUTPUT_DIR,
-    'mobilenetv2_target85_roc_curve.png'
+    'mobilenetv2_single_roc_curve.png'
 )
 
 plt.savefig(save_path, dpi=150)
@@ -593,7 +523,7 @@ for i, (color, cls) in enumerate(zip(colors, CLASS_LABELS)):
         label=f'{cls} (AUC = {pr_auc:.2f})'
     )
 
-plt.title('Precision-Recall Curve — MobileNetV2 Two-Phase + TTA')
+plt.title('Precision-Recall Curve — MobileNetV2 Single Fine-Tune + TTA')
 
 plt.xlabel('Recall')
 plt.ylabel('Precision')
@@ -605,7 +535,7 @@ plt.tight_layout()
 
 save_path = os.path.join(
     OUTPUT_DIR,
-    'mobilenetv2_target85_pr_curve.png'
+    'mobilenetv2_single_pr_curve.png'
 )
 
 plt.savefig(save_path, dpi=150)
@@ -632,12 +562,12 @@ for bars in [b1, b2, b3]:
                 f'{b.get_height():.2f}', ha='center', va='bottom', fontsize=9)
 ax.set_xlabel('Kelas Kerusakan Jalan', fontsize=12)
 ax.set_ylabel('Score', fontsize=12)
-ax.set_title('Precision, Recall & F1-Score per Kelas\nMobileNetV2 Two-Phase + TTA — Klasifikasi Kerusakan Jalan',
+ax.set_title('Precision, Recall & F1-Score per Kelas\nMobileNetV2 Single Fine-Tune + TTA — Klasifikasi Kerusakan Jalan',
              fontsize=13, fontweight='bold')
 ax.set_xticks(x_pos); ax.set_xticklabels(CLASS_LABELS)
 ax.set_ylim(0, 1.2); ax.legend(); ax.grid(axis='y', alpha=0.3)
 plt.tight_layout()
-save_path = os.path.join(OUTPUT_DIR, 'mobilenetv2_target85_per_class_metrics.png')
+save_path = os.path.join(OUTPUT_DIR, 'mobilenetv2_single_per_class_metrics.png')
 plt.savefig(save_path, dpi=150, bbox_inches='tight')
 plt.show()
 print(f'✅ Grafik per kelas tersimpan: {save_path}')
@@ -657,9 +587,9 @@ print(f'Test Loss             : {test_loss:.4f}')
 print(f'Fine Tune Layers      : {FINE_TUNE_LAYERS}')
 print(f'Dropout               : 0.50')
 print(f'Label Smoothing       : 0.10')
-print(f'Strategy              : Two-Phase + TTA')
+print(f'Strategy              : Single Fine-Tune + TTA')
 
-print(f'Model Saved           : mobilenetv2_target85_best.keras')
+print(f'Model Saved           : mobilenetv2_single_best.keras')
 
 print('============================================================')
 
