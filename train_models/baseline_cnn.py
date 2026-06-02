@@ -26,8 +26,7 @@ from tensorflow.keras import layers
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.callbacks import (
     EarlyStopping,
-    ModelCheckpoint,
-    ReduceLROnPlateau
+    ModelCheckpoint
 )
 
 from sklearn.metrics import (
@@ -84,39 +83,14 @@ print(f'Epochs              : {EPOCHS} (LR={LEARNING_RATE})')
 print(f'Arsitektur          : CNN from scratch (tanpa pretrained)')
 
 # ============================================================
-# AUGMENTASI — rescale 1/255 (tanpa preprocess_input pretrained)
+# PREPROCESSING — hanya rescale 1/255 (tanpa augmentasi)
 # ============================================================
 train_datagen = ImageDataGenerator(
-    rescale=1.0 / 255,
-
-    rotation_range=20,
-    width_shift_range=0.15,
-    height_shift_range=0.15,
-
-    shear_range=0.10,
-    zoom_range=0.15,
-
-    horizontal_flip=True,
-    vertical_flip=False,
-
-    brightness_range=[0.85, 1.15],
-
-    fill_mode='nearest'
+    rescale=1.0 / 255
 )
 
 val_test_datagen = ImageDataGenerator(
     rescale=1.0 / 255
-)
-
-# TTA augmentation (lighter)
-tta_datagen = ImageDataGenerator(
-    rescale=1.0 / 255,
-    rotation_range=10,
-    width_shift_range=0.08,
-    height_shift_range=0.08,
-    horizontal_flip=True,
-    zoom_range=0.08,
-    fill_mode='nearest'
 )
 
 # ============================================================
@@ -160,47 +134,27 @@ print(f'Test  : {test_generator.samples}')
 print(f'Class : {CLASS_LABELS}')
 
 # ============================================================
-# MODEL — BASELINE CNN (4 blok konvolusi)
+# MODEL — BASELINE CNN (3 blok konvolusi sederhana)
 # ============================================================
 inputs = keras.Input(shape=(224, 224, 3))
 
 # Block 1
-x = layers.Conv2D(32, (3, 3), padding='same', activation='relu')(inputs)
-x = layers.BatchNormalization()(x)
+x = layers.Conv2D(32, (3, 3), activation='relu')(inputs)
 x = layers.MaxPooling2D((2, 2))(x)
 
 # Block 2
-x = layers.Conv2D(64, (3, 3), padding='same', activation='relu')(x)
-x = layers.BatchNormalization()(x)
+x = layers.Conv2D(64, (3, 3), activation='relu')(x)
 x = layers.MaxPooling2D((2, 2))(x)
 
 # Block 3
-x = layers.Conv2D(128, (3, 3), padding='same', activation='relu')(x)
-x = layers.BatchNormalization()(x)
-x = layers.MaxPooling2D((2, 2))(x)
-
-# Block 4
-x = layers.Conv2D(128, (3, 3), padding='same', activation='relu')(x)
-x = layers.BatchNormalization()(x)
+x = layers.Conv2D(128, (3, 3), activation='relu')(x)
 x = layers.MaxPooling2D((2, 2))(x)
 
 # Head
-x = layers.GlobalAveragePooling2D()(x)
+x = layers.Flatten()(x)
+x = layers.Dense(128, activation='relu')(x)
 
-x = layers.Dense(
-    128,
-    activation='relu',
-    kernel_regularizer=keras.regularizers.l2(0.001)
-)(x)
-
-x = layers.BatchNormalization()(x)
-
-x = layers.Dropout(0.5)(x)
-
-outputs = layers.Dense(
-    NUM_CLASSES,
-    activation='softmax'
-)(x)
+outputs = layers.Dense(NUM_CLASSES, activation='softmax')(x)
 
 model = keras.Model(inputs, outputs)
 
@@ -214,9 +168,7 @@ model.compile(
         learning_rate=LEARNING_RATE
     ),
 
-    loss=tf.keras.losses.CategoricalCrossentropy(
-        label_smoothing=0.10
-    ),
+    loss='categorical_crossentropy',
 
     metrics=['accuracy']
 )
@@ -244,14 +196,6 @@ callbacks = [
         model_save_path,
         monitor='val_accuracy',
         save_best_only=True,
-        verbose=1
-    ),
-
-    ReduceLROnPlateau(
-        monitor='val_loss',
-        factor=0.5,
-        patience=5,
-        min_lr=1e-7,
         verbose=1
     )
 ]
@@ -338,40 +282,14 @@ print(f'\n🏆 Test Accuracy (standard) : {test_acc*100:.2f}%')
 print(f'📉 Test Loss                : {test_loss:.4f}')
 
 # ============================================================
-# TTA (TEST TIME AUGMENTATION) — 5 PASSES
+# PREDIKSI TEST SET
 # ============================================================
-print('\n🔄 Menjalankan TTA (5 augmented passes)...')
-
-NUM_TTA = 5
 y_true = test_generator.classes
-n_samples = len(y_true)
 
-# Standard prediction
 test_generator.reset()
 y_pred_prob = model.predict(test_generator, verbose=0)
 
-# TTA predictions
-for tta_i in range(NUM_TTA):
-    tta_gen = tta_datagen.flow_from_directory(
-        TEST_DIR,
-        target_size=IMG_SIZE,
-        batch_size=BATCH_SIZE,
-        class_mode='categorical',
-        shuffle=False
-    )
-    tta_pred = model.predict(tta_gen, verbose=0)
-    y_pred_prob += tta_pred
-
-# Average over (1 standard + NUM_TTA augmented)
-y_pred_prob = y_pred_prob / (1 + NUM_TTA)
-
 y_pred = np.argmax(y_pred_prob, axis=1)
-
-tta_acc = np.mean(y_pred == y_true)
-print(f'🏆 Test Accuracy (TTA)      : {tta_acc*100:.2f}%')
-
-# Use TTA accuracy as final
-test_acc = tta_acc
 
 # ============================================================
 # CONFUSION MATRIX
@@ -423,13 +341,13 @@ print(report)
 
 report_path = os.path.join(OUTPUT_DIR, 'baseline_cnn_classification_report.txt')
 with open(report_path, 'w') as f:
-    f.write('Classification Report — Baseline CNN (from scratch) + TTA\n')
+    f.write('Classification Report — Baseline CNN (from scratch)\n')
     f.write('Task      : Klasifikasi Kerusakan Jalan\n')
     f.write('Kelas     : Baik | Sedang | Berat\n')
     f.write('='*60 + '\n')
     f.write(report)
-    f.write(f'\nTest Accuracy (TTA) : {test_acc*100:.2f}%')
-    f.write(f'\nTest Loss           : {test_loss:.4f}')
+    f.write(f'\nTest Accuracy : {test_acc*100:.2f}%')
+    f.write(f'\nTest Loss     : {test_loss:.4f}')
 print(f'✅ Report tersimpan: {report_path}')
 
 # ============================================================
@@ -507,7 +425,7 @@ for i, (color, cls) in enumerate(zip(colors, CLASS_LABELS)):
         label=f'{cls} (AUC = {pr_auc:.2f})'
     )
 
-plt.title('Precision-Recall Curve — Baseline CNN + TTA')
+plt.title('Precision-Recall Curve — Baseline CNN')
 
 plt.xlabel('Recall')
 plt.ylabel('Precision')
@@ -546,7 +464,7 @@ for bars in [b1, b2, b3]:
                 f'{b.get_height():.2f}', ha='center', va='bottom', fontsize=9)
 ax.set_xlabel('Kelas Kerusakan Jalan', fontsize=12)
 ax.set_ylabel('Score', fontsize=12)
-ax.set_title('Precision, Recall & F1-Score per Kelas\nBaseline CNN + TTA — Klasifikasi Kerusakan Jalan',
+ax.set_title('Precision, Recall & F1-Score per Kelas\nBaseline CNN — Klasifikasi Kerusakan Jalan',
              fontsize=13, fontweight='bold')
 ax.set_xticks(x_pos); ax.set_xticklabels(CLASS_LABELS)
 ax.set_ylim(0, 1.2); ax.legend(); ax.grid(axis='y', alpha=0.3)
@@ -568,10 +486,8 @@ print(f'Best Val Accuracy     : {best_val_acc*100:.2f}%')
 print(f'Test Accuracy         : {test_acc*100:.2f}%')
 print(f'Test Loss             : {test_loss:.4f}')
 
-print(f'Conv Blocks           : 4 (32→64→128→128)')
-print(f'Dropout               : 0.50')
-print(f'Label Smoothing       : 0.10')
-print(f'Strategy              : From Scratch + TTA')
+print(f'Conv Blocks           : 3 (32→64→128)')
+print(f'Strategy              : From Scratch (CNN murni)')
 
 print(f'Model Saved           : baseline_cnn_best.keras')
 
@@ -582,4 +498,4 @@ if test_acc >= 0.85:
 elif test_acc >= 0.80:
     print('\n✅ TEST ACCURACY > 80%, MENDEKATI TARGET 85%')
 else:
-    print(f'\n⚠️ TEST ACCURACY MASIH : {test_acc*100:.2f}% (wajar untuk baseline tanpa transfer learning)')
+    print(f'\n⚠️ TEST ACCURACY : {test_acc*100:.2f}% (wajar untuk baseline CNN tanpa transfer learning)')
