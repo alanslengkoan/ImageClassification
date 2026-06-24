@@ -1,0 +1,7 @@
+# Dependencies untuk menjalankan aplikasi web Road Damage Detector
+# Diuji pada Python 3.12
+
+Django==6.0.4
+tensorflow==2.21.0
+numpy==2.4.3
+Pillow==10.2.0
