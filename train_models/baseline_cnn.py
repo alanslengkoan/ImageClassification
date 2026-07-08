@@ -475,6 +475,62 @@ plt.show()
 print(f'✅ Grafik per kelas tersimpan: {save_path}')
 
 # ============================================================
+# GRAFIK RINGKASAN TEST ACCURACY & TEST LOSS
+# ============================================================
+ORANGE = '#FF9800'
+GREEN  = '#2E7D32'
+
+fig, (ax_acc, ax_loss) = plt.subplots(1, 2, figsize=(11, 4))
+
+# --- Panel kiri: Test Accuracy ---
+acc_pct = test_acc * 100
+bar_acc = ax_acc.bar(['Baseline CNN'], [acc_pct], width=0.5,
+                     color=ORANGE, edgecolor='none', zorder=3)
+ax_acc.axhline(y=85, color=GREEN, linestyle='--', linewidth=1.5, zorder=2)
+ax_acc.text(0.62, 85, 'Target 85%', color=GREEN, fontsize=10,
+            fontweight='bold', va='bottom', ha='left')
+ax_acc.text(0, acc_pct + 2, f'{acc_pct:.2f}%', ha='center', va='bottom',
+            fontsize=13, fontweight='bold')
+ax_acc.set_title('Test Accuracy', fontsize=13, fontweight='bold')
+ax_acc.set_ylabel('Accuracy (%)')
+ax_acc.set_ylim(0, 100)
+ax_acc.grid(axis='y', alpha=0.3, zorder=0)
+
+# --- Panel kanan: Test Loss ---
+bar_loss = ax_loss.bar(['Baseline CNN'], [test_loss], width=0.5,
+                       color=ORANGE, edgecolor='none', zorder=3)
+ax_loss.text(0, test_loss + 0.02, f'{test_loss:.4f}', ha='center', va='bottom',
+             fontsize=13, fontweight='bold')
+ax_loss.set_title('Test Loss', fontsize=13, fontweight='bold')
+ax_loss.set_ylabel('Loss')
+ax_loss.set_ylim(0, max(1.0, test_loss * 1.3))
+ax_loss.grid(axis='y', alpha=0.3, zorder=0)
+
+# --- Judul header ---
+fig.suptitle('BASELINE CNN', fontsize=15, fontweight='bold', color='white',
+             bbox=dict(boxstyle='round,pad=0.5', facecolor=ORANGE, edgecolor='none'),
+             y=1.02)
+
+# --- Footer ringkasan ---
+fig.text(0.5, -0.06,
+         f'Test Accuracy : {acc_pct:.2f}%      |      Test Loss : {test_loss:.4f}',
+         ha='center', va='center', fontsize=11, fontweight='bold',
+         bbox=dict(boxstyle='round,pad=0.6', facecolor='white',
+                   edgecolor=ORANGE, linewidth=1.5))
+
+plt.tight_layout()
+
+save_path = os.path.join(
+    OUTPUT_DIR,
+    'baseline_cnn_test_summary.png'
+)
+
+plt.savefig(save_path, dpi=150, bbox_inches='tight')
+plt.show()
+
+print(f'✅ Grafik ringkasan test tersimpan: {save_path}')
+
+# ============================================================
 # RINGKASAN AKHIR
 # ============================================================
 print('\n============================================================')
