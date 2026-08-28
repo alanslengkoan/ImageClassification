@@ -4,7 +4,7 @@ import os, shutil, random
 # KONFIGURASI PATH & KELAS
 # ============================================================
 BASE_DIR   = '/home/echolog/Documents/Project/www/skripsi/ImageClassification/train_models'
-SOURCE_DIR = os.path.join(BASE_DIR, 'dataset_all')   # folder dengan 3 sub-folder: baik/sedang/berat
+SOURCE_DIR = os.path.join(BASE_DIR, 'dataset_all_clean')   # hasil clean_objects.py (object non-jalan sudah di-mask)
 TRAIN_DIR  = os.path.join(BASE_DIR, 'dataset', 'train')
 VAL_DIR    = os.path.join(BASE_DIR, 'dataset', 'val')
 TEST_DIR   = os.path.join(BASE_DIR, 'dataset', 'test')

@@ -10,6 +10,8 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 # Model di-load sekali saat pertama kali dipakai (lazy load)
 _model = None
+_segformer = None
+_seg_processor = None
 
 CLASS_NAMES = ['baik', 'berat', 'sedang']   # urutan alphabetical ImageDataGenerator
 
@@ -39,10 +41,53 @@ def _get_model():
     return _model
 
 
-def _preprocess(image_file) -> np.ndarray:
-    from tensorflow.keras.applications.resnet50 import preprocess_input
+def _get_segformer():
+    global _segformer, _seg_processor
+    if _segformer is None:
+        import torch
+        from transformers import SegformerImageProcessor, SegformerForSemanticSegmentation
+        _seg_processor = SegformerImageProcessor.from_pretrained(
+            'Marco333/segformer-b0-road-scene-7class'
+        )
+        _segformer = SegformerForSemanticSegmentation.from_pretrained(
+            'Marco333/segformer-b0-road-scene-7class'
+        )
+        _segformer.eval()
+    return _segformer, _seg_processor
+
+
+def _remove_objects(image_file) -> Image.Image:
+    import cv2
+    import torch
+    import torch.nn.functional as F
+
+    model, processor = _get_segformer()
 
     img = Image.open(image_file).convert('RGB')
+    img_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+    h, w = img_cv.shape[:2]
+
+    inputs = processor(images=img, return_tensors='pt')
+
+    with torch.no_grad():
+        outputs = model(**inputs)
+
+    mask = F.interpolate(
+        outputs.logits,
+        size=(h, w),
+        mode='bilinear',
+        align_corners=False
+    ).argmax(dim=1)[0].numpy()
+
+    road_mask = (mask == 0).astype(np.uint8)
+    img_cv[road_mask == 0] = 0
+
+    return Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
+
+
+def _preprocess(img: Image.Image) -> np.ndarray:
+    from tensorflow.keras.applications.resnet50 import preprocess_input
+
     img = img.resize((224, 224), Image.LANCZOS)
     arr = np.array(img, dtype=np.float32)
     arr = preprocess_input(arr)
@@ -65,7 +110,10 @@ def _predict_one(image_file, model):
     image_url = _save_upload(image_file)
     image_file.seek(0)
 
-    tensor = _preprocess(image_file)
+    img_clean = _remove_objects(image_file)
+    image_file.seek(0)
+
+    tensor = _preprocess(img_clean)
     probs  = model.predict(tensor, verbose=0)[0]
 
     pred_idx   = int(np.argmax(probs))
