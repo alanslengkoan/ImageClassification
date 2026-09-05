@@ -69,7 +69,7 @@ PHASE1_LR        = 0.001
 
 # Phase 2: Fine-tune
 PHASE2_EPOCHS    = 50
-PHASE2_LR        = 0.00003
+PHASE2_LR        = 0.00005
 FINE_TUNE_LAYERS = 15
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -89,15 +89,15 @@ print(f'TARGET TEST ACC     : >= 85%')
 # ============================================================
 train_datagen = ImageDataGenerator(
     preprocessing_function=preprocess_input,
-    rotation_range=30,
-    width_shift_range=0.20,
-    height_shift_range=0.20,
-    shear_range=0.15,
-    zoom_range=0.25,
+    rotation_range=25,
+    width_shift_range=0.15,
+    height_shift_range=0.15,
+    shear_range=0.12,
+    zoom_range=0.20,
     horizontal_flip=True,
     vertical_flip=False,
-    brightness_range=[0.80, 1.20],
-    channel_shift_range=15.0,
+    brightness_range=[0.85, 1.15],
+    channel_shift_range=10.0,
     fill_mode='nearest'
 )
 
@@ -183,29 +183,25 @@ print(f'Phase 2         : Fine-tune last {FINE_TUNE_LAYERS} layers (LR={PHASE2_L
 # ============================================================
 inputs = keras.Input(shape=(224, 224, 3))
 
-x = layers.GaussianNoise(0.1)(inputs)
+x = layers.GaussianNoise(0.05)(inputs)
 
 x = base_model(x, training=False)
 
 x = layers.GlobalAveragePooling2D()(x)
 
 # ============================================================
-# HEAD MODEL (simplified — anti overfitting)
+# HEAD MODEL (anti overfitting — balanced regularization)
 # ============================================================
 x = layers.BatchNormalization()(x)
 
 x = layers.Dense(
-    64,
+    128,
     activation='relu',
     kernel_initializer='he_normal',
-    kernel_regularizer=keras.regularizers.l2(0.01)
+    kernel_regularizer=keras.regularizers.l2(0.003)
 )(x)
 
-x = layers.Dropout(0.6)(x)
-
-x = layers.BatchNormalization()(x)
-
-x = layers.Dropout(0.3)(x)
+x = layers.Dropout(0.5)(x)
 
 outputs = layers.Dense(NUM_CLASSES, activation='softmax')(x)
 
@@ -231,7 +227,7 @@ print('\n✅ Model berhasil dikompilasi (Phase 1 — Head Only)')
 callbacks_phase1 = [
     EarlyStopping(
         monitor='val_accuracy',
-        patience=8,
+        patience=10,
         restore_best_weights=True,
         verbose=1
     ),
@@ -244,7 +240,7 @@ callbacks_phase1 = [
     ReduceLROnPlateau(
         monitor='val_loss',
         factor=0.5,
-        patience=3,
+        patience=4,
         min_lr=1e-6,
         verbose=1
     )
@@ -293,8 +289,8 @@ model.compile(
 
 callbacks_phase2 = [
     EarlyStopping(
-        monitor='val_loss',
-        patience=10,
+        monitor='val_accuracy',
+        patience=12,
         restore_best_weights=True,
         verbose=1
     ),
@@ -307,7 +303,7 @@ callbacks_phase2 = [
     ReduceLROnPlateau(
         monitor='val_loss',
         factor=0.5,
-        patience=4,
+        patience=5,
         min_lr=1e-7,
         verbose=1
     )
@@ -535,7 +531,7 @@ print(f'Best Val Accuracy     : {best_val_acc*100:.2f}%')
 print(f'Test Accuracy         : {test_acc*100:.2f}%')
 print(f'Test Loss             : {test_loss:.4f}')
 print(f'Fine Tune Layers      : {FINE_TUNE_LAYERS}')
-print(f'Dropout               : 0.60 + 0.30')
+print(f'Dropout               : 0.50')
 print(f'Label Smoothing       : 0.05')
 print(f'Strategy              : Two-Phase + TTA')
 print(f'Model Saved           : resnet50_3class_best.h5')
