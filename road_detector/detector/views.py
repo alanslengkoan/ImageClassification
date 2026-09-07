@@ -13,6 +13,10 @@ _model = None
 _segformer = None
 _seg_processor = None
 
+ROAD_CLASS_ID = 0
+SIDEWALK_CLASS_ID = 1
+MIN_ROAD_RATIO = 0.06
+
 CLASS_NAMES = ['baik', 'berat', 'sedang']   # urutan alphabetical ImageDataGenerator
 
 CLASS_INFO = {
@@ -79,7 +83,51 @@ def _remove_objects(image_file) -> Image.Image:
         align_corners=False
     ).argmax(dim=1)[0].numpy()
 
-    road_mask = (mask == 0).astype(np.uint8)
+    road_mask = (mask == ROAD_CLASS_ID).astype(np.uint8)
+
+    k = np.ones((7, 7), np.uint8)
+    road_mask = cv2.morphologyEx(road_mask, cv2.MORPH_CLOSE, k, iterations=1)
+    road_mask = cv2.dilate(road_mask, k, iterations=1)
+
+    h_mask, w_mask = road_mask.shape
+
+    def _largest_bottom_component(bin_mask: np.ndarray) -> np.ndarray:
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(bin_mask, connectivity=8)
+        if num_labels <= 1:
+            return bin_mask
+
+        bottom_band = labels[max(0, h_mask - max(10, h_mask // 12)):h_mask, :]
+        bottom_ids = np.unique(bottom_band)
+        bottom_ids = bottom_ids[bottom_ids != 0]
+
+        candidate_ids = bottom_ids if len(bottom_ids) > 0 else np.arange(1, num_labels)
+        best_id = int(candidate_ids[np.argmax(stats[candidate_ids, cv2.CC_STAT_AREA])])
+        return (labels == best_id).astype(np.uint8)
+
+    road_mask = _largest_bottom_component(road_mask)
+    road_ratio = float(road_mask.mean())
+
+    if road_ratio < MIN_ROAD_RATIO:
+        fallback = ((mask == ROAD_CLASS_ID) | (mask == SIDEWALK_CLASS_ID)).astype(np.uint8)
+
+        prior = np.zeros_like(fallback, dtype=np.uint8)
+        poly = np.array([
+            [int(w_mask * 0.05), h_mask - 1],
+            [int(w_mask * 0.95), h_mask - 1],
+            [int(w_mask * 0.65), int(h_mask * 0.45)],
+            [int(w_mask * 0.35), int(h_mask * 0.45)],
+        ], dtype=np.int32)
+        cv2.fillConvexPoly(prior, poly, 1)
+
+        fallback = fallback * prior
+        fallback = cv2.morphologyEx(fallback, cv2.MORPH_CLOSE, k, iterations=1)
+        fallback = _largest_bottom_component(fallback)
+
+        if float(fallback.mean()) >= MIN_ROAD_RATIO:
+            road_mask = fallback
+        else:
+            road_mask = prior
+
     img_cv[road_mask == 0] = 0
 
     return Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
