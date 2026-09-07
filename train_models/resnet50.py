@@ -68,9 +68,9 @@ PHASE1_EPOCHS    = 20
 PHASE1_LR        = 0.001
 
 # Phase 2: Fine-tune
-PHASE2_EPOCHS    = 50
+PHASE2_EPOCHS    = 20
 PHASE2_LR        = 0.00005
-FINE_TUNE_LAYERS = 15
+FINE_TUNE_LAYERS = 10
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -183,7 +183,7 @@ print(f'Phase 2         : Fine-tune last {FINE_TUNE_LAYERS} layers (LR={PHASE2_L
 # ============================================================
 inputs = keras.Input(shape=(224, 224, 3))
 
-x = layers.GaussianNoise(0.05)(inputs)
+x = layers.GaussianNoise(0.02)(inputs)
 
 x = base_model(x, training=False)
 
@@ -198,7 +198,7 @@ x = layers.Dense(
     128,
     activation='relu',
     kernel_initializer='he_normal',
-    kernel_regularizer=keras.regularizers.l2(0.003)
+    kernel_regularizer=keras.regularizers.l2(0.001)
 )(x)
 
 x = layers.Dropout(0.5)(x)
@@ -215,7 +215,7 @@ model_save_path = os.path.join(OUTPUT_DIR, 'resnet50_3class_best.h5')
 
 model.compile(
     optimizer=tf.keras.optimizers.Adam(learning_rate=PHASE1_LR),
-    loss=tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.05),
+    loss=tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.02),
     metrics=['accuracy']
 )
 
@@ -283,21 +283,22 @@ print(f'Trainable layers di base_model: {trainable_count}')
 # Re-compile dengan LR rendah
 model.compile(
     optimizer=tf.keras.optimizers.Adam(learning_rate=PHASE2_LR),
-    loss=tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.05),
+    loss=tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.02),
     metrics=['accuracy']
 )
 
 callbacks_phase2 = [
     EarlyStopping(
-        monitor='val_accuracy',
-        patience=12,
+        monitor='val_loss',
+        patience=8,
         restore_best_weights=True,
         verbose=1
     ),
     ModelCheckpoint(
         model_save_path,
-        monitor='val_accuracy',
+        monitor='val_loss',
         save_best_only=True,
+        mode='min',
         verbose=1
     ),
     ReduceLROnPlateau(
@@ -532,7 +533,7 @@ print(f'Test Accuracy         : {test_acc*100:.2f}%')
 print(f'Test Loss             : {test_loss:.4f}')
 print(f'Fine Tune Layers      : {FINE_TUNE_LAYERS}')
 print(f'Dropout               : 0.50')
-print(f'Label Smoothing       : 0.05')
+print(f'Label Smoothing       : 0.02')
 print(f'Strategy              : Two-Phase + TTA')
 print(f'Model Saved           : resnet50_3class_best.h5')
 print('============================================================')
