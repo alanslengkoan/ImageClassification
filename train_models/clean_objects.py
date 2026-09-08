@@ -23,10 +23,13 @@ IMAGE_EXTS = ('.jpg', '.jpeg', '.png', '.bmp', '.webp')
 # Class mapping SegFormer road scene (7 class):
 #   0=road, 1=sidewalk, 2=building, 3=vegetation,
 #   4=sky, 5=vehicle, 6=roadside_object
-# Kita keep hanya class 0 (road) — sisanya di-mask hitam
+# Keep beberapa class yang masih relevan ke konteks jalan
 ROAD_CLASS_ID = 0
 SIDEWALK_CLASS_ID = 1
-MIN_ROAD_RATIO = 0.06
+ROADSIDE_OBJECT_CLASS_ID = 6
+KEEP_CLASS_IDS = (ROAD_CLASS_ID, SIDEWALK_CLASS_ID, ROADSIDE_OBJECT_CLASS_ID)
+MIN_ROAD_RATIO = 0.03
+BACKGROUND_KEEP_ALPHA = 0.12
 
 # ============================================================
 # LOAD SEGFORMER PRE-TRAINED
@@ -67,16 +70,15 @@ def segment_road(img_bgr: np.ndarray) -> np.ndarray:
         align_corners=False
     ).argmax(dim=1)[0].numpy()
 
-    # Buat mask: hanya pixel dengan class=road yang dipertahankan
-    road_mask = (mask == ROAD_CLASS_ID).astype(np.uint8)  # 1=road, 0=non-road
+    # Buat mask awal: road + sidewalk + roadside object
+    road_mask = np.isin(mask, KEEP_CLASS_IDS).astype(np.uint8)  # 1=keep, 0=mask
 
-    k = np.ones((7, 7), np.uint8)
+    k = np.ones((5, 5), np.uint8)
     road_mask = cv2.morphologyEx(road_mask, cv2.MORPH_CLOSE, k, iterations=1)
-    road_mask = cv2.dilate(road_mask, k, iterations=1)
 
     h_mask, w_mask = road_mask.shape
 
-    def _largest_bottom_component(bin_mask: np.ndarray) -> np.ndarray:
+    def _bottom_connected_components(bin_mask: np.ndarray) -> np.ndarray:
         num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(bin_mask, connectivity=8)
         if num_labels <= 1:
             return bin_mask
@@ -85,37 +87,51 @@ def segment_road(img_bgr: np.ndarray) -> np.ndarray:
         bottom_ids = np.unique(bottom_band)
         bottom_ids = bottom_ids[bottom_ids != 0]
 
-        candidate_ids = bottom_ids if len(bottom_ids) > 0 else np.arange(1, num_labels)
-        best_id = int(candidate_ids[np.argmax(stats[candidate_ids, cv2.CC_STAT_AREA])])
-        return (labels == best_id).astype(np.uint8)
+        if len(bottom_ids) == 0:
+            candidate_ids = np.arange(1, num_labels)
+            best_id = int(candidate_ids[np.argmax(stats[candidate_ids, cv2.CC_STAT_AREA])])
+            return (labels == best_id).astype(np.uint8)
 
-    road_mask = _largest_bottom_component(road_mask)
+        keep = np.zeros_like(bin_mask, dtype=np.uint8)
+        min_area = max(200, int(0.002 * h_mask * w_mask))
+        for comp_id in bottom_ids:
+            if stats[comp_id, cv2.CC_STAT_AREA] >= min_area:
+                keep[labels == comp_id] = 1
+
+        if keep.sum() == 0:
+            keep = (labels == int(bottom_ids[0])).astype(np.uint8)
+
+        return keep
+
+    road_mask = _bottom_connected_components(road_mask)
     road_ratio = float(road_mask.mean())
 
     if road_ratio < MIN_ROAD_RATIO:
-        fallback = ((mask == ROAD_CLASS_ID) | (mask == SIDEWALK_CLASS_ID)).astype(np.uint8)
+        fallback = np.isin(mask, KEEP_CLASS_IDS).astype(np.uint8)
 
         prior = np.zeros_like(fallback, dtype=np.uint8)
         poly = np.array([
-            [int(w_mask * 0.05), h_mask - 1],
-            [int(w_mask * 0.95), h_mask - 1],
-            [int(w_mask * 0.65), int(h_mask * 0.45)],
-            [int(w_mask * 0.35), int(h_mask * 0.45)],
+            [int(w_mask * 0.03), h_mask - 1],
+            [int(w_mask * 0.97), h_mask - 1],
+            [int(w_mask * 0.70), int(h_mask * 0.35)],
+            [int(w_mask * 0.30), int(h_mask * 0.35)],
         ], dtype=np.int32)
         cv2.fillConvexPoly(prior, poly, 1)
 
         fallback = fallback * prior
         fallback = cv2.morphologyEx(fallback, cv2.MORPH_CLOSE, k, iterations=1)
-        fallback = _largest_bottom_component(fallback)
+        fallback = _bottom_connected_components(fallback)
 
         if float(fallback.mean()) >= MIN_ROAD_RATIO:
             road_mask = fallback
         else:
             road_mask = prior
 
-    # Terapkan mask ke gambar asli
-    result = img_bgr.copy()
-    result[road_mask == 0] = 0  # non-road → hitam
+    # Terapkan soft-mask ke gambar asli (lebih tidak agresif daripada hitam total)
+    result = img_bgr.astype(np.float32)
+    bg = result * BACKGROUND_KEEP_ALPHA
+    result = np.where(road_mask[..., None] == 1, result, bg)
+    result = np.clip(result, 0, 255).astype(np.uint8)
 
     return result
 

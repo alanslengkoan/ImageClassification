@@ -89,15 +89,15 @@ print(f'TARGET TEST ACC     : >= 85%')
 # ============================================================
 train_datagen = ImageDataGenerator(
     preprocessing_function=preprocess_input,
-    rotation_range=25,
-    width_shift_range=0.15,
-    height_shift_range=0.15,
+    rotation_range=20,
+    width_shift_range=0.12,
+    height_shift_range=0.12,
     shear_range=0.12,
-    zoom_range=0.20,
+    zoom_range=0.15,
     horizontal_flip=True,
     vertical_flip=False,
-    brightness_range=[0.85, 1.15],
-    channel_shift_range=10.0,
+    brightness_range=[0.90, 1.10],
+    channel_shift_range=6.0,
     fill_mode='nearest'
 )
 
@@ -183,7 +183,7 @@ print(f'Phase 2         : Fine-tune last {FINE_TUNE_LAYERS} layers (LR={PHASE2_L
 # ============================================================
 inputs = keras.Input(shape=(224, 224, 3))
 
-x = layers.GaussianNoise(0.02)(inputs)
+x = layers.GaussianNoise(0.01)(inputs)
 
 x = base_model(x, training=False)
 
@@ -211,7 +211,7 @@ model.summary()
 # ============================================================
 # COMPILE — PHASE 1 (HEAD ONLY)
 # ============================================================
-model_save_path = os.path.join(OUTPUT_DIR, 'resnet50_3class_best.h5')
+model_save_path = os.path.join(OUTPUT_DIR, 'resnet50_3class_best.keras')
 
 model.compile(
     optimizer=tf.keras.optimizers.Adam(learning_rate=PHASE1_LR),
@@ -535,7 +535,7 @@ print(f'Fine Tune Layers      : {FINE_TUNE_LAYERS}')
 print(f'Dropout               : 0.50')
 print(f'Label Smoothing       : 0.02')
 print(f'Strategy              : Two-Phase + TTA')
-print(f'Model Saved           : resnet50_3class_best.h5')
+print(f'Model Saved           : resnet50_3class_best.keras')
 print('============================================================')
 
 if test_acc >= 0.85:
