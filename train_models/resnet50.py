@@ -62,15 +62,19 @@ OUTPUT_DIR = os.path.join(BASE_DIR, 'dataset', 'output')
 IMG_SIZE         = (224, 224)
 BATCH_SIZE       = 16
 NUM_CLASSES      = 3
+LOSS_TARGET      = 0.50
+LABEL_SMOOTHING  = 0.00
+DROPOUT_RATE     = 0.35
+L2_REG           = 0.0002
 
 # Phase 1: Head only
-PHASE1_EPOCHS    = 20
-PHASE1_LR        = 0.001
+PHASE1_EPOCHS    = 25
+PHASE1_LR        = 0.0007
 
 # Phase 2: Fine-tune
-PHASE2_EPOCHS    = 20
-PHASE2_LR        = 0.00005
-FINE_TUNE_LAYERS = 10
+PHASE2_EPOCHS    = 25
+PHASE2_LR        = 0.00002
+FINE_TUNE_LAYERS = 35
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -82,6 +86,10 @@ print(f'BATCH_SIZE          : {BATCH_SIZE}')
 print(f'Phase 1 Epochs      : {PHASE1_EPOCHS} (head only, LR={PHASE1_LR})')
 print(f'Phase 2 Epochs      : {PHASE2_EPOCHS} (fine-tune, LR={PHASE2_LR})')
 print(f'FINE_TUNE_LAYERS    : {FINE_TUNE_LAYERS}')
+print(f'Label Smoothing     : {LABEL_SMOOTHING}')
+print(f'Dropout             : {DROPOUT_RATE}')
+print(f'L2 Regularization   : {L2_REG}')
+print(f'TARGET VAL LOSS     : <= {LOSS_TARGET}')
 print(f'TARGET TEST ACC     : >= 85%')
 
 # ============================================================
@@ -89,15 +97,14 @@ print(f'TARGET TEST ACC     : >= 85%')
 # ============================================================
 train_datagen = ImageDataGenerator(
     preprocessing_function=preprocess_input,
-    rotation_range=20,
-    width_shift_range=0.12,
-    height_shift_range=0.12,
-    shear_range=0.12,
-    zoom_range=0.15,
+    rotation_range=14,
+    width_shift_range=0.08,
+    height_shift_range=0.08,
+    shear_range=0.08,
+    zoom_range=0.12,
     horizontal_flip=True,
     vertical_flip=False,
-    brightness_range=[0.90, 1.10],
-    channel_shift_range=6.0,
+    brightness_range=[0.95, 1.05],
     fill_mode='nearest'
 )
 
@@ -195,13 +202,20 @@ x = layers.GlobalAveragePooling2D()(x)
 x = layers.BatchNormalization()(x)
 
 x = layers.Dense(
+    256,
+    activation='relu',
+    kernel_initializer='he_normal',
+    kernel_regularizer=keras.regularizers.l2(L2_REG)
+)(x)
+
+x = layers.Dropout(DROPOUT_RATE)(x)
+x = layers.Dense(
     128,
     activation='relu',
     kernel_initializer='he_normal',
-    kernel_regularizer=keras.regularizers.l2(0.001)
+    kernel_regularizer=keras.regularizers.l2(L2_REG * 0.5)
 )(x)
-
-x = layers.Dropout(0.5)(x)
+x = layers.Dropout(0.25)(x)
 
 outputs = layers.Dense(NUM_CLASSES, activation='softmax')(x)
 
@@ -215,7 +229,7 @@ model_save_path = os.path.join(OUTPUT_DIR, 'resnet50_3class_best.keras')
 
 model.compile(
     optimizer=tf.keras.optimizers.Adam(learning_rate=PHASE1_LR),
-    loss=tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.02),
+    loss=tf.keras.losses.CategoricalCrossentropy(label_smoothing=LABEL_SMOOTHING),
     metrics=['accuracy']
 )
 
@@ -226,21 +240,22 @@ print('\n✅ Model berhasil dikompilasi (Phase 1 — Head Only)')
 # ============================================================
 callbacks_phase1 = [
     EarlyStopping(
-        monitor='val_accuracy',
-        patience=10,
+        monitor='val_loss',
+        patience=7,
         restore_best_weights=True,
         verbose=1
     ),
     ModelCheckpoint(
         model_save_path,
-        monitor='val_accuracy',
+        monitor='val_loss',
         save_best_only=True,
+        mode='min',
         verbose=1
     ),
     ReduceLROnPlateau(
         monitor='val_loss',
         factor=0.5,
-        patience=4,
+        patience=3,
         min_lr=1e-6,
         verbose=1
     )
@@ -283,14 +298,14 @@ print(f'Trainable layers di base_model: {trainable_count}')
 # Re-compile dengan LR rendah
 model.compile(
     optimizer=tf.keras.optimizers.Adam(learning_rate=PHASE2_LR),
-    loss=tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.02),
+    loss=tf.keras.losses.CategoricalCrossentropy(label_smoothing=LABEL_SMOOTHING),
     metrics=['accuracy']
 )
 
 callbacks_phase2 = [
     EarlyStopping(
         monitor='val_loss',
-        patience=8,
+        patience=6,
         restore_best_weights=True,
         verbose=1
     ),
@@ -304,8 +319,8 @@ callbacks_phase2 = [
     ReduceLROnPlateau(
         monitor='val_loss',
         factor=0.5,
-        patience=5,
-        min_lr=1e-7,
+        patience=3,
+        min_lr=1e-8,
         verbose=1
     )
 ]
@@ -532,8 +547,8 @@ print(f'Best Val Accuracy     : {best_val_acc*100:.2f}%')
 print(f'Test Accuracy         : {test_acc*100:.2f}%')
 print(f'Test Loss             : {test_loss:.4f}')
 print(f'Fine Tune Layers      : {FINE_TUNE_LAYERS}')
-print(f'Dropout               : 0.50')
-print(f'Label Smoothing       : 0.02')
+print(f'Dropout               : {DROPOUT_RATE}')
+print(f'Label Smoothing       : {LABEL_SMOOTHING}')
 print(f'Strategy              : Two-Phase + TTA')
 print(f'Model Saved           : resnet50_3class_best.keras')
 print('============================================================')
