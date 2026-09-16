@@ -73,15 +73,19 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 IMG_SIZE         = (224, 224)
 BATCH_SIZE       = 16
 NUM_CLASSES      = 3
+LOSS_TARGET      = 0.50
+LABEL_SMOOTHING  = 0.00
+DROPOUT_RATE     = 0.35
+L2_REG           = 0.0002
 
 # Phase 1: Head only
-PHASE1_EPOCHS    = 30
-PHASE1_LR        = 0.001
+PHASE1_EPOCHS    = 25
+PHASE1_LR        = 0.0007
 
 # Phase 2: Fine-tune
-PHASE2_EPOCHS    = 80
-PHASE2_LR        = 0.00003
-FINE_TUNE_LAYERS = 20
+PHASE2_EPOCHS    = 25
+PHASE2_LR        = 0.00002
+FINE_TUNE_LAYERS = 35
 
 print('\n============================================================')
 print('⚙️ KONFIGURASI TRAINING')
@@ -92,6 +96,10 @@ print(f'BATCH_SIZE          : {BATCH_SIZE}')
 print(f'Phase 1 Epochs      : {PHASE1_EPOCHS} (head only, LR={PHASE1_LR})')
 print(f'Phase 2 Epochs      : {PHASE2_EPOCHS} (fine-tune, LR={PHASE2_LR})')
 print(f'FINE_TUNE_LAYERS    : {FINE_TUNE_LAYERS}')
+print(f'Label Smoothing     : {LABEL_SMOOTHING}')
+print(f'Dropout             : {DROPOUT_RATE}')
+print(f'L2 Regularization   : {L2_REG}')
+print(f'TARGET VAL LOSS     : <= {LOSS_TARGET}')
 print(f'TARGET TEST ACC     : >= 85%')
 
 # ============================================================
@@ -99,19 +107,14 @@ print(f'TARGET TEST ACC     : >= 85%')
 # ============================================================
 train_datagen = ImageDataGenerator(
     preprocessing_function=preprocess_input,
-
-    rotation_range=20,
-    width_shift_range=0.15,
-    height_shift_range=0.15,
-
-    shear_range=0.10,
-    zoom_range=0.15,
-
+    rotation_range=14,
+    width_shift_range=0.08,
+    height_shift_range=0.08,
+    shear_range=0.08,
+    zoom_range=0.12,
     horizontal_flip=True,
     vertical_flip=False,
-
-    brightness_range=[0.85, 1.15],
-
+    brightness_range=[0.95, 1.05],
     fill_mode='nearest'
 )
 
@@ -170,6 +173,14 @@ print(f'Val   : {val_generator.samples}')
 print(f'Test  : {test_generator.samples}')
 print(f'Class : {CLASS_LABELS}')
 
+class_weights_array = class_weight.compute_class_weight(
+    class_weight='balanced',
+    classes=np.unique(train_generator.classes),
+    y=train_generator.classes
+)
+class_weights_dict = dict(enumerate(class_weights_array))
+print(f'Class Weights : {class_weights_dict}')
+
 # ============================================================
 # BASE MODEL — PHASE 1: FREEZE ALL
 # ============================================================
@@ -204,15 +215,23 @@ x = layers.GlobalAveragePooling2D()(x)
 # ============================================================
 # HEAD MODEL (simplified — reduce overfitting)
 # ============================================================
+x = layers.BatchNormalization()(x)
+
+x = layers.Dense(
+    256,
+    activation='relu',
+    kernel_initializer='he_normal',
+    kernel_regularizer=keras.regularizers.l2(L2_REG)
+)(x)
+
+x = layers.Dropout(DROPOUT_RATE)(x)
 x = layers.Dense(
     128,
     activation='relu',
-    kernel_regularizer=keras.regularizers.l2(0.001)
+    kernel_initializer='he_normal',
+    kernel_regularizer=keras.regularizers.l2(L2_REG * 0.5)
 )(x)
-
-x = layers.BatchNormalization()(x)
-
-x = layers.Dropout(0.5)(x)
+x = layers.Dropout(0.25)(x)
 
 outputs = layers.Dense(
     NUM_CLASSES,
@@ -232,7 +251,7 @@ model.compile(
     ),
 
     loss=tf.keras.losses.CategoricalCrossentropy(
-        label_smoothing=0.10
+        label_smoothing=LABEL_SMOOTHING
     ),
 
     metrics=['accuracy']
@@ -251,16 +270,17 @@ model_save_path = os.path.join(
 callbacks_phase1 = [
 
     EarlyStopping(
-        monitor='val_accuracy',
-        patience=10,
+        monitor='val_loss',
+        patience=7,
         restore_best_weights=True,
         verbose=1
     ),
 
     ModelCheckpoint(
         model_save_path,
-        monitor='val_accuracy',
+        monitor='val_loss',
         save_best_only=True,
+        mode='min',
         verbose=1
     ),
 
@@ -285,11 +305,13 @@ history_phase1 = model.fit(
     validation_data=val_generator,
     epochs=PHASE1_EPOCHS,
     callbacks=callbacks_phase1,
+    class_weight=class_weights_dict,
     verbose=1
 )
 
 print('\n✅ Phase 1 selesai')
 print(f'Best Val Accuracy Phase 1: {max(history_phase1.history["val_accuracy"])*100:.2f}%')
+print(f'Best Val Loss Phase 1    : {min(history_phase1.history["val_loss"]):.4f}')
 
 # ============================================================
 # PHASE 2 — FINE-TUNE DEEPER LAYERS
@@ -313,7 +335,7 @@ model.compile(
     ),
 
     loss=tf.keras.losses.CategoricalCrossentropy(
-        label_smoothing=0.10
+        label_smoothing=LABEL_SMOOTHING
     ),
 
     metrics=['accuracy']
@@ -322,24 +344,25 @@ model.compile(
 callbacks_phase2 = [
 
     EarlyStopping(
-        monitor='val_accuracy',
-        patience=20,
+        monitor='val_loss',
+        patience=6,
         restore_best_weights=True,
         verbose=1
     ),
 
     ModelCheckpoint(
         model_save_path,
-        monitor='val_accuracy',
+        monitor='val_loss',
         save_best_only=True,
+        mode='min',
         verbose=1
     ),
 
     ReduceLROnPlateau(
         monitor='val_loss',
         factor=0.5,
-        patience=5,
-        min_lr=1e-7,
+        patience=3,
+        min_lr=1e-8,
         verbose=1
     )
 ]
@@ -349,6 +372,7 @@ history_phase2 = model.fit(
     validation_data=val_generator,
     epochs=PHASE2_EPOCHS,
     callbacks=callbacks_phase2,
+    class_weight=class_weights_dict,
     verbose=1
 )
 
@@ -361,8 +385,11 @@ for key in history_phase1.history:
 # HASIL TRAINING
 # ============================================================
 best_val_acc = max(history['val_accuracy'])
+best_val_loss = min(history['val_loss'])
 best_val_acc_p1 = max(history_phase1.history['val_accuracy'])
 best_val_acc_p2 = max(history_phase2.history['val_accuracy'])
+best_val_loss_p1 = min(history_phase1.history['val_loss'])
+best_val_loss_p2 = min(history_phase2.history['val_loss'])
 
 print('\n============================================================')
 print('📊 HASIL TRAINING')
@@ -371,6 +398,9 @@ print('============================================================')
 print(f'Best Val Accuracy Phase 1 : {best_val_acc_p1*100:.2f}%')
 print(f'Best Val Accuracy Phase 2 : {best_val_acc_p2*100:.2f}%')
 print(f'Best Val Accuracy Overall : {best_val_acc*100:.2f}%')
+print(f'Best Val Loss Phase 1     : {best_val_loss_p1:.4f}')
+print(f'Best Val Loss Phase 2     : {best_val_loss_p2:.4f}')
+print(f'Best Val Loss Overall     : {best_val_loss:.4f}')
 
 # ============================================================
 # VISUALISASI
@@ -651,17 +681,23 @@ print('============================================================')
 
 print(f'Backbone              : MobileNetV2')
 print(f'Best Val Accuracy     : {best_val_acc*100:.2f}%')
+print(f'Best Val Loss         : {best_val_loss:.4f}')
 print(f'Test Accuracy         : {test_acc*100:.2f}%')
 print(f'Test Loss             : {test_loss:.4f}')
 
 print(f'Fine Tune Layers      : {FINE_TUNE_LAYERS}')
-print(f'Dropout               : 0.50')
-print(f'Label Smoothing       : 0.10')
+print(f'Dropout               : {DROPOUT_RATE}')
+print(f'Label Smoothing       : {LABEL_SMOOTHING}')
 print(f'Strategy              : Two-Phase + TTA')
 
 print(f'Model Saved           : mobilenetv2_target85_best.keras')
 
 print('============================================================')
+
+if best_val_loss <= LOSS_TARGET:
+    print(f'\n🎯 TARGET VAL LOSS <= {LOSS_TARGET:.2f} BERHASIL ({best_val_loss:.4f})')
+else:
+    print(f'\n⚠️ TARGET VAL LOSS <= {LOSS_TARGET:.2f} BELUM TERCAPAI ({best_val_loss:.4f})')
 
 if test_acc >= 0.85:
     print('\n🔥 TARGET TEST ACCURACY ≥ 85% BERHASIL DICAPAI!')

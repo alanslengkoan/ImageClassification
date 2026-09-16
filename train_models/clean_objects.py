@@ -64,7 +64,7 @@ print('✅ SegFormer-B0 siap')
 # ============================================================
 # FUNGSI SEGMENTASI JALAN
 # ============================================================
-def segment_road(img_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def segment_road(img_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray, float, bool]:
     """Return (result_bgr, road_mask_255) dengan fokus utama pada area jalan."""
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     pil_img = Image.fromarray(img_rgb)
@@ -129,8 +129,10 @@ def segment_road(img_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     road_mask = _bottom_connected_components(road_mask)
     road_mask = _fill_holes(road_mask)
     road_ratio = float(road_mask.mean())
+    used_fallback = False
 
     if road_ratio < MIN_ROAD_RATIO:
+        used_fallback = True
         fallback = np.isin(mask, KEEP_CLASS_IDS).astype(np.uint8)
 
         prior = np.zeros_like(fallback, dtype=np.uint8)
@@ -165,13 +167,16 @@ def segment_road(img_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     result = np.clip(result, 0, 255).astype(np.uint8)
 
     road_mask_u8 = (road_mask * 255).astype(np.uint8)
-    return result, road_mask_u8
+    final_road_ratio = float(road_mask.mean())
+    return result, road_mask_u8, final_road_ratio, used_fallback
 
 # ============================================================
 # PROSES SEMUA GAMBAR
 # ============================================================
 total_processed = 0
 total_masked    = 0
+total_fallback  = 0
+all_road_ratios = []
 
 for cls in CLASSES:
     src_path = os.path.join(SOURCE_DIR, cls)
@@ -189,6 +194,8 @@ for cls in CLASSES:
     images = sorted([f for f in os.listdir(src_path) if f.lower().endswith(IMAGE_EXTS)])
     n = len(images)
     print(f'\n📂 {cls}: {n} gambar')
+    cls_road_ratios = []
+    cls_fallback_count = 0
 
     for i, fname in enumerate(images, 1):
         img_path = os.path.join(src_path, fname)
@@ -200,10 +207,15 @@ for cls in CLASSES:
             continue
 
         # Segmentasi: keep fokus jalan, redupkan area non-jalan
-        result, road_mask = segment_road(img)
+        result, road_mask, road_ratio, used_fallback = segment_road(img)
 
         cv2.imwrite(save_path, result)
         total_processed += 1
+        cls_road_ratios.append(road_ratio)
+        all_road_ratios.append(road_ratio)
+        if used_fallback:
+            cls_fallback_count += 1
+            total_fallback += 1
 
         # Cek apakah ada perubahan (ada area non-jalan yang di-mask)
         if not np.array_equal(img, result):
@@ -218,10 +230,25 @@ for cls in CLASSES:
         if i % 50 == 0 or i == n:
             print(f'   [{i}/{n}] {total_masked} gambar di-mask...')
 
+    if len(cls_road_ratios) > 0:
+        cls_min = float(np.min(cls_road_ratios))
+        cls_med = float(np.median(cls_road_ratios))
+        cls_max = float(np.max(cls_road_ratios))
+        cls_mean = float(np.mean(cls_road_ratios))
+        print(f'   Road ratio {cls:10s}: min={cls_min:.3f} | median={cls_med:.3f} | mean={cls_mean:.3f} | max={cls_max:.3f}')
+        print(f'   Fallback digunakan : {cls_fallback_count}/{len(cls_road_ratios)} gambar')
+
 print(f'\n{"=" * 55}')
 print(f'🎉 Selesai!')
 print(f'   Total diproses  : {total_processed} gambar')
 print(f'   Total di-mask   : {total_masked} gambar')
+print(f'   Total fallback  : {total_fallback} gambar')
+if len(all_road_ratios) > 0:
+    all_min = float(np.min(all_road_ratios))
+    all_med = float(np.median(all_road_ratios))
+    all_max = float(np.max(all_road_ratios))
+    all_mean = float(np.mean(all_road_ratios))
+    print(f'   Road ratio all  : min={all_min:.3f} | median={all_med:.3f} | mean={all_mean:.3f} | max={all_max:.3f}')
 print(f'   Output folder   : {OUTPUT_DIR}')
 if SAVE_PREVIEW:
     print(f'   Preview folder  : {os.path.join(OUTPUT_DIR, "_preview")}')

@@ -32,9 +32,10 @@ BASE_DIR   = '/home/echolog/Documents/Project/www/skripsi/ImageClassification/tr
 TEST_DIR   = os.path.join(BASE_DIR, 'dataset', 'test')
 OUTPUT_DIR = os.path.join(BASE_DIR, 'dataset', 'output')
 
-MODEL_RESNET      = os.path.join(OUTPUT_DIR, 'resnet50_3class_best.h5')
+MODEL_RESNET      = os.path.join(OUTPUT_DIR, 'resnet50_3class_best.keras')
 MODEL_MOBILENET   = os.path.join(OUTPUT_DIR, 'mobilenetv2_target85_best.keras')
 COMPARE_DIR       = os.path.join(OUTPUT_DIR, 'comparison')
+LOSS_TARGET       = 0.50
 
 IMG_SIZE   = (224, 224)
 BATCH_SIZE = 32
@@ -113,6 +114,7 @@ print(f'   {"-"*47}')
 print(f'   {"ResNet50":<20} {acc_resnet*100:>14.2f}% {loss_resnet:>12.4f}')
 print(f'   {"MobileNetV2":<20} {acc_mobilenet*100:>14.2f}% {loss_mobilenet:>12.4f}')
 print(f'{"=" * 60}')
+print(f'   Target val/test loss acuan : <= {LOSS_TARGET:.2f}')
 delta = (acc_mobilenet - acc_resnet) * 100
 if delta > 0:
     print(f'\n   MobileNetV2 unggul {delta:+.2f}% dibanding ResNet50')
@@ -334,6 +336,9 @@ for cls in CLASS_LABELS:
     f1_m = rd_mobilenet[cls]['f1-score']
     print(f'   {f"F1 {cls}":<25} {f1_r:>14.4f} {f1_m:>14.4f}')
 print(f'   {"-" * 53}')
+status_resnet = 'PASS' if loss_resnet <= LOSS_TARGET else 'FAIL'
+status_mobilenet = 'PASS' if loss_mobilenet <= LOSS_TARGET else 'FAIL'
+print(f'   {"Target Loss <= 0.50":<25} {status_resnet:>14} {status_mobilenet:>14}')
 if delta > 0:
     print(f'   {"Selisih Accuracy":<25} {f"{delta:+.2f}% (MobileNetV2 unggul)":>28}')
 elif delta < 0:

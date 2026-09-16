@@ -26,7 +26,8 @@ from tensorflow.keras import layers
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.callbacks import (
     EarlyStopping,
-    ModelCheckpoint
+    ModelCheckpoint,
+    ReduceLROnPlateau
 )
 
 from sklearn.metrics import (
@@ -38,6 +39,7 @@ from sklearn.metrics import (
 )
 
 from sklearn.preprocessing import label_binarize
+from sklearn.utils import class_weight
 from itertools import cycle
 
 import warnings
@@ -69,9 +71,13 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 IMG_SIZE      = (224, 224)
 BATCH_SIZE    = 16
 NUM_CLASSES   = 3
+LOSS_TARGET   = 0.50
+LABEL_SMOOTHING = 0.00
+DROPOUT_RATE  = 0.35
+L2_REG        = 0.0002
 
-EPOCHS        = 80
-LEARNING_RATE = 0.001
+EPOCHS        = 50
+LEARNING_RATE = 0.0007
 
 print('\n============================================================')
 print('⚙️ KONFIGURASI TRAINING — BASELINE CNN')
@@ -80,13 +86,25 @@ print('============================================================')
 print(f'IMG_SIZE            : {IMG_SIZE}')
 print(f'BATCH_SIZE          : {BATCH_SIZE}')
 print(f'Epochs              : {EPOCHS} (LR={LEARNING_RATE})')
+print(f'Label Smoothing     : {LABEL_SMOOTHING}')
+print(f'Dropout             : {DROPOUT_RATE}')
+print(f'L2 Regularization   : {L2_REG}')
+print(f'TARGET VAL LOSS     : <= {LOSS_TARGET}')
 print(f'Arsitektur          : CNN from scratch (tanpa pretrained)')
 
 # ============================================================
-# PREPROCESSING — hanya rescale 1/255 (tanpa augmentasi)
+# PREPROCESSING + AUGMENTASI
 # ============================================================
 train_datagen = ImageDataGenerator(
-    rescale=1.0 / 255
+    rescale=1.0 / 255,
+    rotation_range=14,
+    width_shift_range=0.08,
+    height_shift_range=0.08,
+    shear_range=0.08,
+    zoom_range=0.12,
+    horizontal_flip=True,
+    brightness_range=[0.95, 1.05],
+    fill_mode='nearest'
 )
 
 val_test_datagen = ImageDataGenerator(
@@ -133,26 +151,57 @@ print(f'Val   : {val_generator.samples}')
 print(f'Test  : {test_generator.samples}')
 print(f'Class : {CLASS_LABELS}')
 
+class_weights_array = class_weight.compute_class_weight(
+    class_weight='balanced',
+    classes=np.unique(train_generator.classes),
+    y=train_generator.classes
+)
+class_weights_dict = dict(enumerate(class_weights_array))
+print(f'Class Weights : {class_weights_dict}')
+
 # ============================================================
 # MODEL — BASELINE CNN (3 blok konvolusi sederhana)
 # ============================================================
 inputs = keras.Input(shape=(224, 224, 3))
 
 # Block 1
-x = layers.Conv2D(32, (3, 3), activation='relu')(inputs)
+x = layers.Conv2D(32, (3, 3), padding='same', kernel_initializer='he_normal')(inputs)
+x = layers.BatchNormalization()(x)
+x = layers.Activation('relu')(x)
 x = layers.MaxPooling2D((2, 2))(x)
+x = layers.Dropout(0.15)(x)
 
 # Block 2
-x = layers.Conv2D(64, (3, 3), activation='relu')(x)
+x = layers.Conv2D(64, (3, 3), padding='same', kernel_initializer='he_normal')(x)
+x = layers.BatchNormalization()(x)
+x = layers.Activation('relu')(x)
 x = layers.MaxPooling2D((2, 2))(x)
+x = layers.Dropout(0.20)(x)
 
 # Block 3
-x = layers.Conv2D(128, (3, 3), activation='relu')(x)
+x = layers.Conv2D(128, (3, 3), padding='same', kernel_initializer='he_normal')(x)
+x = layers.BatchNormalization()(x)
+x = layers.Activation('relu')(x)
 x = layers.MaxPooling2D((2, 2))(x)
+x = layers.Dropout(0.25)(x)
 
 # Head
-x = layers.Flatten()(x)
-x = layers.Dense(128, activation='relu')(x)
+x = layers.GlobalAveragePooling2D()(x)
+x = layers.BatchNormalization()(x)
+x = layers.Dense(
+    256,
+    activation='relu',
+    kernel_initializer='he_normal',
+    kernel_regularizer=keras.regularizers.l2(L2_REG)
+)(x)
+x = layers.Dropout(DROPOUT_RATE)(x)
+x = layers.Dense(
+    128,
+    activation='relu',
+    kernel_initializer='he_normal',
+    kernel_regularizer=keras.regularizers.l2(L2_REG * 0.5)
+)(x)
+x = layers.Dropout(0.25)(x)
 
 outputs = layers.Dense(NUM_CLASSES, activation='softmax')(x)
 
@@ -168,7 +217,9 @@ model.compile(
         learning_rate=LEARNING_RATE
     ),
 
-    loss='categorical_crossentropy',
+    loss=tf.keras.losses.CategoricalCrossentropy(
+        label_smoothing=LABEL_SMOOTHING
+    ),
 
     metrics=['accuracy']
 )
@@ -186,16 +237,25 @@ model_save_path = os.path.join(
 callbacks = [
 
     EarlyStopping(
-        monitor='val_accuracy',
-        patience=15,
+        monitor='val_loss',
+        patience=7,
         restore_best_weights=True,
         verbose=1
     ),
 
     ModelCheckpoint(
         model_save_path,
-        monitor='val_accuracy',
+        monitor='val_loss',
         save_best_only=True,
+        mode='min',
+        verbose=1
+    ),
+
+    ReduceLROnPlateau(
+        monitor='val_loss',
+        factor=0.5,
+        patience=3,
+        min_lr=1e-6,
         verbose=1
     )
 ]
@@ -212,6 +272,7 @@ history_obj = model.fit(
     validation_data=val_generator,
     epochs=EPOCHS,
     callbacks=callbacks,
+    class_weight=class_weights_dict,
     verbose=1
 )
 
@@ -219,17 +280,20 @@ history = history_obj.history
 
 print('\n✅ Training selesai')
 print(f'Best Val Accuracy: {max(history["val_accuracy"])*100:.2f}%')
+print(f'Best Val Loss    : {min(history["val_loss"]):.4f}')
 
 # ============================================================
 # HASIL TRAINING
 # ============================================================
 best_val_acc = max(history['val_accuracy'])
+best_val_loss = min(history['val_loss'])
 
 print('\n============================================================')
 print('📊 HASIL TRAINING')
 print('============================================================')
 
 print(f'Best Val Accuracy : {best_val_acc*100:.2f}%')
+print(f'Best Val Loss     : {best_val_loss:.4f}')
 print(f'Total Epochs Run  : {len(history["accuracy"])}')
 
 # ============================================================
@@ -539,15 +603,23 @@ print('============================================================')
 
 print(f'Arsitektur            : Baseline CNN (from scratch)')
 print(f'Best Val Accuracy     : {best_val_acc*100:.2f}%')
+print(f'Best Val Loss         : {best_val_loss:.4f}')
 print(f'Test Accuracy         : {test_acc*100:.2f}%')
 print(f'Test Loss             : {test_loss:.4f}')
 
 print(f'Conv Blocks           : 3 (32→64→128)')
-print(f'Strategy              : From Scratch (CNN murni)')
+print(f'Dropout               : {DROPOUT_RATE}')
+print(f'Label Smoothing       : {LABEL_SMOOTHING}')
+print(f'Strategy              : From Scratch + Loss-Focused Training')
 
 print(f'Model Saved           : baseline_cnn_best.keras')
 
 print('============================================================')
+
+if best_val_loss <= LOSS_TARGET:
+    print(f'\n🎯 TARGET VAL LOSS <= {LOSS_TARGET:.2f} BERHASIL ({best_val_loss:.4f})')
+else:
+    print(f'\n⚠️ TARGET VAL LOSS <= {LOSS_TARGET:.2f} BELUM TERCAPAI ({best_val_loss:.4f})')
 
 if test_acc >= 0.85:
     print('\n🔥 TARGET TEST ACCURACY ≥ 85% BERHASIL DICAPAI!')

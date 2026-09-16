@@ -1,4 +1,4 @@
-import os, shutil, random
+import os, shutil, random, json
 
 # ============================================================
 # KONFIGURASI PATH & KELAS
@@ -10,12 +10,17 @@ VAL_DIR    = os.path.join(BASE_DIR, 'dataset', 'val')
 TEST_DIR   = os.path.join(BASE_DIR, 'dataset', 'test')
 
 CLASSES    = ['baik', 'sedang', 'berat']
+IMAGE_EXTS = ('.jpg', '.jpeg', '.png')
 
 TRAIN_RATIO = 0.7   # 70% train
 VAL_RATIO   = 0.2   # 20% val
 TEST_RATIO  = 0.1   # 10% test
 
-random.seed(42)
+SPLIT_SEED = 42
+MANIFEST_PATH = os.path.join(BASE_DIR, 'dataset', 'split_manifest.json')
+REPLAY_SPLIT_FROM_MANIFEST = True
+
+random.seed(SPLIT_SEED)
 
 # ============================================================
 # CEK FOLDER SOURCE
@@ -31,8 +36,7 @@ for cls in CLASSES:
     path = os.path.join(SOURCE_DIR, cls)
     if not os.path.exists(path):
         raise SystemExit(f'❌ Folder kelas tidak ditemukan: {path}')
-    count = len([f for f in os.listdir(path)
-                 if f.lower().endswith(('.jpg', '.jpeg', '.png'))])
+    count = len([f for f in os.listdir(path) if f.lower().endswith(IMAGE_EXTS)])
     total_source += count
     status = '✅' if count > 0 else '⚠️  kosong!'
     print(f'   {status} {cls:10s}: {count:3d} gambar')
@@ -46,11 +50,18 @@ print(f'\n🔍 Mengumpulkan dan mengacak gambar...')
 images_per_class = {}
 for cls in CLASSES:
     src  = os.path.join(SOURCE_DIR, cls)
-    imgs = [f for f in os.listdir(src)
-            if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+    imgs = sorted([f for f in os.listdir(src) if f.lower().endswith(IMAGE_EXTS)])
     random.shuffle(imgs)
     images_per_class[cls] = imgs
     print(f'   {cls:10s}: {len(imgs):3d} gambar')
+
+manifest_data = None
+if REPLAY_SPLIT_FROM_MANIFEST and os.path.exists(MANIFEST_PATH):
+    with open(MANIFEST_PATH, 'r') as f:
+        manifest_data = json.load(f)
+    print(f'\n📄 Replay split dari manifest: {MANIFEST_PATH}')
+else:
+    print(f'\n🆕 Membuat manifest split baru (seed={SPLIT_SEED})')
 
 # ============================================================
 # HAPUS FOLDER LAMA, BUAT ULANG
@@ -79,17 +90,37 @@ print('-' * 60)
 total_train = 0
 total_val   = 0
 total_test  = 0
+split_manifest = {
+    'seed': SPLIT_SEED,
+    'source_dir': SOURCE_DIR,
+    'ratios': {
+        'train': TRAIN_RATIO,
+        'val': VAL_RATIO,
+        'test': TEST_RATIO,
+    },
+    'classes': {},
+}
 
 for cls in CLASSES:
     src        = os.path.join(SOURCE_DIR, cls)
     all_images = images_per_class[cls]
 
-    n          = len(all_images)
-    n_train    = int(n * TRAIN_RATIO)
-    n_val      = int(n * VAL_RATIO)
-    train_imgs = all_images[:n_train]
-    val_imgs   = all_images[n_train:n_train + n_val]
-    test_imgs  = all_images[n_train + n_val:]
+    if manifest_data is not None and cls in manifest_data.get('classes', {}):
+        class_manifest = manifest_data['classes'][cls]
+        train_imgs = class_manifest.get('train', [])
+        val_imgs = class_manifest.get('val', [])
+        test_imgs = class_manifest.get('test', [])
+        all_split_files = set(train_imgs + val_imgs + test_imgs)
+        missing = [f for f in all_split_files if not os.path.exists(os.path.join(src, f))]
+        if len(missing) > 0:
+            raise SystemExit(f'❌ Manifest split tidak valid untuk kelas {cls}, file hilang: {missing[:5]}')
+    else:
+        n          = len(all_images)
+        n_train    = int(n * TRAIN_RATIO)
+        n_val      = int(n * VAL_RATIO)
+        train_imgs = all_images[:n_train]
+        val_imgs   = all_images[n_train:n_train + n_val]
+        test_imgs  = all_images[n_train + n_val:]
 
     for img in train_imgs:
         shutil.copy(os.path.join(src, img), os.path.join(TRAIN_DIR, cls, img))
@@ -101,10 +132,20 @@ for cls in CLASSES:
     total_train += len(train_imgs)
     total_val   += len(val_imgs)
     total_test  += len(test_imgs)
+    split_manifest['classes'][cls] = {
+        'train': train_imgs,
+        'val': val_imgs,
+        'test': test_imgs,
+    }
     print(f'   {cls:10s}: {len(train_imgs):3d} train | {len(val_imgs):3d} val | {len(test_imgs):3d} test')
 
 print('-' * 60)
 print(f'   {"TOTAL":10s}: {total_train:3d} train | {total_val:3d} val | {total_test:3d} test')
+
+os.makedirs(os.path.dirname(MANIFEST_PATH), exist_ok=True)
+with open(MANIFEST_PATH, 'w') as f:
+    json.dump(split_manifest, f, indent=2)
+print(f'\n🧾 Manifest split tersimpan: {MANIFEST_PATH}')
 
 # ============================================================
 # VERIFIKASI HASIL

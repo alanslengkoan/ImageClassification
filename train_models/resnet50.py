@@ -279,6 +279,7 @@ history_phase1 = model.fit(
 
 print('\n✅ Phase 1 selesai')
 print(f'Best Val Accuracy Phase 1: {max(history_phase1.history["val_accuracy"])*100:.2f}%')
+print(f'Best Val Loss Phase 1    : {min(history_phase1.history["val_loss"]):.4f}')
 
 # ============================================================
 # PHASE 2 — FINE-TUNE
@@ -340,6 +341,7 @@ for key in history_phase1.history:
     history[key] = history_phase1.history[key] + history_phase2.history[key]
 
 best_val_acc = max(history['val_accuracy'])
+best_val_loss = min(history['val_loss'])
 total_epochs = len(history['accuracy'])
 
 print('\n============================================================')
@@ -348,6 +350,9 @@ print('============================================================')
 print(f'Best Val Accuracy Phase 1 : {max(history_phase1.history["val_accuracy"])*100:.2f}%')
 print(f'Best Val Accuracy Phase 2 : {max(history_phase2.history["val_accuracy"])*100:.2f}%')
 print(f'Best Val Accuracy Overall : {best_val_acc*100:.2f}%')
+print(f'Best Val Loss Phase 1     : {min(history_phase1.history["val_loss"]):.4f}')
+print(f'Best Val Loss Phase 2     : {min(history_phase2.history["val_loss"]):.4f}')
+print(f'Best Val Loss Overall     : {best_val_loss:.4f}')
 
 # ============================================================
 # VISUALISASI TRAINING HISTORY
@@ -544,6 +549,7 @@ print('📋 RINGKASAN AKHIR')
 print('============================================================')
 print(f'Backbone              : ResNet50')
 print(f'Best Val Accuracy     : {best_val_acc*100:.2f}%')
+print(f'Best Val Loss         : {best_val_loss:.4f}')
 print(f'Test Accuracy         : {test_acc*100:.2f}%')
 print(f'Test Loss             : {test_loss:.4f}')
 print(f'Fine Tune Layers      : {FINE_TUNE_LAYERS}')
@@ -552,6 +558,11 @@ print(f'Label Smoothing       : {LABEL_SMOOTHING}')
 print(f'Strategy              : Two-Phase + TTA')
 print(f'Model Saved           : resnet50_3class_best.keras')
 print('============================================================')
+
+if best_val_loss <= LOSS_TARGET:
+    print(f'\n🎯 TARGET VAL LOSS <= {LOSS_TARGET:.2f} BERHASIL ({best_val_loss:.4f})')
+else:
+    print(f'\n⚠️ TARGET VAL LOSS <= {LOSS_TARGET:.2f} BELUM TERCAPAI ({best_val_loss:.4f})')
 
 if test_acc >= 0.85:
     print('\n🔥 TARGET TEST ACCURACY ≥ 85% BERHASIL DICAPAI!')
