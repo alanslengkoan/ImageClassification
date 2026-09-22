@@ -200,6 +200,15 @@ def _save_upload(image_file) -> str:
     return f'{settings.MEDIA_URL}uploads/{filename}'
 
 
+def _save_cleaned_image(img: Image.Image) -> str:
+    filename = f'{uuid.uuid4().hex}.jpg'
+    save_dir = os.path.join(settings.MEDIA_ROOT, 'cleaned')
+    os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(save_dir, filename)
+    img.convert('RGB').save(save_path, 'JPEG', quality=95)
+    return f'{settings.MEDIA_URL}cleaned/{filename}'
+
+
 def _predict_one(image_file, model):
     filename = getattr(image_file, 'name', 'uploaded-image')
     print(f'[PREDICT] Start: {filename}')
@@ -210,6 +219,7 @@ def _predict_one(image_file, model):
 
     img_clean = _remove_objects(image_file)
     image_file.seek(0)
+    cleaned_image_url = _save_cleaned_image(img_clean)
 
     tensor = _preprocess(img_clean)
     probs  = model.predict(tensor, verbose=0)[0]
@@ -237,9 +247,10 @@ def _predict_one(image_file, model):
     )
 
     return {
-        'image_url'    : image_url,
-        'filename'     : filename,
-        'pred_class'   : pred_class,
+        'image_url'        : image_url,
+        'cleaned_image_url': cleaned_image_url,
+        'filename'         : filename,
+        'pred_class'       : pred_class,
         'pred_label'   : info['label'],
         'pred_color'   : info['color'],
         'pred_icon'    : info['icon'],
