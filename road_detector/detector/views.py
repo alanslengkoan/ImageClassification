@@ -1,4 +1,5 @@
 import os
+import time
 import uuid
 import numpy as np
 
@@ -36,12 +37,15 @@ def _get_model():
         from tensorflow.keras.models import load_model as keras_load
 
         model_path = str(settings.MODEL_PATH)
+        print(f'[PREDICT] Loading classifier: {model_path}')
+        started_at = time.time()
         if not os.path.exists(model_path):
             raise FileNotFoundError(
                 f'Model tidak ditemukan: {model_path}\n'
                 'Jalankan resnet50.py terlebih dahulu untuk melatih model.'
             )
         _model = keras_load(model_path)
+        print(f'[PREDICT] Classifier loaded in {time.time() - started_at:.2f}s')
     return _model
 
 
@@ -50,13 +54,18 @@ def _get_segformer():
     if _segformer is None:
         import torch
         from transformers import SegformerImageProcessor, SegformerForSemanticSegmentation
+
+        started_at = time.time()
+        print('[SEGMENT] Loading SegFormer processor...')
         _seg_processor = SegformerImageProcessor.from_pretrained(
             'Marco333/segformer-b0-road-scene-7class'
         )
+        print('[SEGMENT] Loading SegFormer model...')
         _segformer = SegformerForSemanticSegmentation.from_pretrained(
             'Marco333/segformer-b0-road-scene-7class'
         )
         _segformer.eval()
+        print(f'[SEGMENT] SegFormer ready in {time.time() - started_at:.2f}s')
     return _segformer, _seg_processor
 
 
@@ -65,6 +74,9 @@ def _remove_objects(image_file) -> Image.Image:
     import torch
     import torch.nn.functional as F
 
+    filename = getattr(image_file, 'name', 'uploaded-image')
+    print(f'[SEGMENT] Cleaning objects: {filename}')
+    started_at = time.time()
     model, processor = _get_segformer()
 
     img = Image.open(image_file).convert('RGB')
@@ -115,8 +127,10 @@ def _remove_objects(image_file) -> Image.Image:
     road_mask = _largest_bottom_component(road_mask)
     road_mask = _fill_holes(road_mask)
     road_ratio = float(road_mask.mean())
+    used_fallback = False
 
     if road_ratio < MIN_ROAD_RATIO:
+        used_fallback = True
         fallback = ((mask == ROAD_CLASS_ID) | (mask == SIDEWALK_CLASS_ID)).astype(np.uint8)
 
         prior = np.zeros_like(fallback, dtype=np.uint8)
@@ -148,6 +162,12 @@ def _remove_objects(image_file) -> Image.Image:
     result = (fg * soft_mask) + (bg * (1.0 - soft_mask))
     result = np.clip(result, 0, 255).astype(np.uint8)
 
+    final_ratio = float(road_mask.mean())
+    print(
+        f'[SEGMENT] Done: {filename} | road_ratio={final_ratio:.3f} | '
+        f'fallback={used_fallback} | {time.time() - started_at:.2f}s'
+    )
+
     return Image.fromarray(cv2.cvtColor(result, cv2.COLOR_BGR2RGB))
 
 
@@ -173,6 +193,10 @@ def _save_upload(image_file) -> str:
 
 
 def _predict_one(image_file, model):
+    filename = getattr(image_file, 'name', 'uploaded-image')
+    print(f'[PREDICT] Start: {filename}')
+    started_at = time.time()
+
     image_url = _save_upload(image_file)
     image_file.seek(0)
 
@@ -198,9 +222,15 @@ def _predict_one(image_file, model):
     ]
     probabilities.sort(key=lambda x: x['value'], reverse=True)
 
+    print(
+        f'[PREDICT] Done: {filename} | pred={pred_class} | '
+        f'confidence={float(probs[pred_idx]) * 100:.2f}% | '
+        f'{time.time() - started_at:.2f}s'
+    )
+
     return {
         'image_url'    : image_url,
-        'filename'     : image_file.name,
+        'filename'     : filename,
         'pred_class'   : pred_class,
         'pred_label'   : info['label'],
         'pred_color'   : info['color'],
