@@ -52,10 +52,12 @@ def _get_model():
 def _get_segformer():
     global _segformer, _seg_processor
     if _segformer is None:
+        started_at = time.time()
+        print('[SEGMENT] Importing torch/transformers...')
         import torch
         from transformers import SegformerImageProcessor, SegformerForSemanticSegmentation
+        print(f'[SEGMENT] Libraries imported in {time.time() - started_at:.2f}s')
 
-        started_at = time.time()
         print('[SEGMENT] Loading SegFormer processor...')
         _seg_processor = SegformerImageProcessor.from_pretrained(
             'Marco333/segformer-b0-road-scene-7class'
