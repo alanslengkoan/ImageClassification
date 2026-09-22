@@ -3,6 +3,12 @@ import time
 import uuid
 import numpy as np
 
+os.environ.setdefault('OMP_NUM_THREADS', '1')
+os.environ.setdefault('MKL_NUM_THREADS', '1')
+os.environ.setdefault('TF_NUM_INTRAOP_THREADS', '1')
+os.environ.setdefault('TF_NUM_INTEROP_THREADS', '1')
+os.environ.setdefault('TOKENIZERS_PARALLELISM', 'false')
+
 from django.conf import settings
 from django.shortcuts import render
 
@@ -259,6 +265,7 @@ def index(request):
             return render(request, 'detector/index.html', context)
 
         try:
+            _get_segformer()
             model   = _get_model()
             results = []
             errors  = []
