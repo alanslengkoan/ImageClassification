@@ -15,7 +15,7 @@ _seg_processor = None
 
 ROAD_CLASS_ID = 0
 SIDEWALK_CLASS_ID = 1
-MIN_ROAD_RATIO = 0.06
+MIN_ROAD_RATIO = 0.03
 
 CLASS_NAMES = ['baik', 'berat', 'sedang']   # urutan alphabetical ImageDataGenerator
 
@@ -85,9 +85,10 @@ def _remove_objects(image_file) -> Image.Image:
 
     road_mask = (mask == ROAD_CLASS_ID).astype(np.uint8)
 
-    k = np.ones((7, 7), np.uint8)
-    road_mask = cv2.morphologyEx(road_mask, cv2.MORPH_CLOSE, k, iterations=1)
-    road_mask = cv2.dilate(road_mask, k, iterations=1)
+    k_close = np.ones((7, 7), np.uint8)
+    k_open = np.ones((3, 3), np.uint8)
+    road_mask = cv2.morphologyEx(road_mask, cv2.MORPH_CLOSE, k_close, iterations=1)
+    road_mask = cv2.morphologyEx(road_mask, cv2.MORPH_OPEN, k_open, iterations=1)
 
     h_mask, w_mask = road_mask.shape
 
@@ -104,7 +105,15 @@ def _remove_objects(image_file) -> Image.Image:
         best_id = int(candidate_ids[np.argmax(stats[candidate_ids, cv2.CC_STAT_AREA])])
         return (labels == best_id).astype(np.uint8)
 
+    def _fill_holes(bin_mask: np.ndarray) -> np.ndarray:
+        flood = bin_mask.copy().astype(np.uint8)
+        flood_canvas = np.zeros((h_mask + 2, w_mask + 2), dtype=np.uint8)
+        cv2.floodFill(flood, flood_canvas, (0, 0), 1)
+        holes = (1 - flood) & (1 - bin_mask)
+        return (bin_mask | holes).astype(np.uint8)
+
     road_mask = _largest_bottom_component(road_mask)
+    road_mask = _fill_holes(road_mask)
     road_ratio = float(road_mask.mean())
 
     if road_ratio < MIN_ROAD_RATIO:
@@ -112,15 +121,16 @@ def _remove_objects(image_file) -> Image.Image:
 
         prior = np.zeros_like(fallback, dtype=np.uint8)
         poly = np.array([
-            [int(w_mask * 0.05), h_mask - 1],
-            [int(w_mask * 0.95), h_mask - 1],
-            [int(w_mask * 0.65), int(h_mask * 0.45)],
-            [int(w_mask * 0.35), int(h_mask * 0.45)],
+            [int(w_mask * 0.03), h_mask - 1],
+            [int(w_mask * 0.97), h_mask - 1],
+            [int(w_mask * 0.70), int(h_mask * 0.35)],
+            [int(w_mask * 0.30), int(h_mask * 0.35)],
         ], dtype=np.int32)
         cv2.fillConvexPoly(prior, poly, 1)
 
         fallback = fallback * prior
-        fallback = cv2.morphologyEx(fallback, cv2.MORPH_CLOSE, k, iterations=1)
+        fallback = cv2.morphologyEx(fallback, cv2.MORPH_CLOSE, k_close, iterations=1)
+        fallback = _fill_holes(fallback)
         fallback = _largest_bottom_component(fallback)
 
         if float(fallback.mean()) >= MIN_ROAD_RATIO:
@@ -128,9 +138,17 @@ def _remove_objects(image_file) -> Image.Image:
         else:
             road_mask = prior
 
-    img_cv[road_mask == 0] = 0
+    soft_mask = cv2.GaussianBlur(road_mask.astype(np.float32), (0, 0), 3.5)
+    soft_mask = np.clip(soft_mask, 0.0, 1.0)[..., None]
 
-    return Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
+    fg = img_cv.astype(np.float32)
+    bg_blur = cv2.GaussianBlur(img_cv, (0, 0), 12).astype(np.float32)
+    bg = bg_blur * 0.06
+
+    result = (fg * soft_mask) + (bg * (1.0 - soft_mask))
+    result = np.clip(result, 0, 255).astype(np.uint8)
+
+    return Image.fromarray(cv2.cvtColor(result, cv2.COLOR_BGR2RGB))
 
 
 def _preprocess(img: Image.Image) -> np.ndarray:

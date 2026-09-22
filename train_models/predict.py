@@ -17,9 +17,9 @@ warnings.filterwarnings('ignore')
 # ============================================================
 # KONFIGURASI
 # ============================================================
-BASE_DIR    = '/home/echolog/Documents/Project/www/skripsi/ImageClassification-CNN'
-MODEL_PATH  = os.path.join(BASE_DIR, 'dataset', 'output', 'resnet50_3class_best.h5')
-OUTPUT_DIR  = os.path.join(BASE_DIR, 'dataset', 'output')
+BASE_DIR    = '/home/echolog/Documents/Project/www/skripsi/ImageClassification'
+MODEL_PATH  = os.path.join(BASE_DIR, 'models', 'resnet50_3class_best.h5')
+OUTPUT_DIR  = os.path.join(BASE_DIR, 'models')
 
 IMG_SIZE    = (224, 224)
 CLASS_NAMES = ['baik', 'berat', 'sedang']   # urutan alphabetical dari ImageDataGenerator
