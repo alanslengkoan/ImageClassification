@@ -35,6 +35,56 @@ CLASS_INFO = {
                'desc': 'Kerusakan berat terdeteksi, perlu perbaikan segera.'},
 }
 
+AMBIGUOUS_INFO = {'label': 'Ambigu', 'color': 'gray', 'icon': '⚠️'}
+
+AMBIGUOUS_REASONS = {
+    'tie'           : 'Probabilitas dua kelas teratas sama (seri)',
+    'near_tie'      : 'Selisih probabilitas dua kelas teratas sangat kecil',
+    'low_confidence': 'Confidence kelas teratas terlalu rendah',
+}
+
+
+def _decide(probs) -> dict:
+    """Aturan tie/near-tie (sama dengan train_models/decision_rule.py).
+
+    Tidak memaksa argmax bila top1 - top2 < PREDICTION_TIE_MARGIN atau
+    top1 < PREDICTION_MIN_CONFIDENCE → status AMBIGU, perlu verifikasi.
+    """
+    tie_margin = float(getattr(settings, 'PREDICTION_TIE_MARGIN', 0.10))
+    min_conf   = float(getattr(settings, 'PREDICTION_MIN_CONFIDENCE', 0.50))
+
+    probs  = np.asarray(probs, dtype=np.float64).ravel()
+    order  = np.argsort(-probs, kind='stable')
+    i1, i2 = int(order[0]), int(order[1])
+    p1, p2 = float(probs[i1]), float(probs[i2])
+    margin = p1 - p2
+
+    reason = None
+    if margin <= 1e-6:
+        reason = 'tie'
+    elif margin < tie_margin:
+        reason = 'near_tie'
+    elif p1 < min_conf:
+        reason = 'low_confidence'
+
+    if reason:
+        candidates = [CLASS_NAMES[int(i)] for i in order if p1 - probs[int(i)] < max(tie_margin, 2e-6)]
+        if len(candidates) < 2:
+            candidates = [CLASS_NAMES[i1], CLASS_NAMES[i2]]
+    else:
+        candidates = [CLASS_NAMES[i1]]
+
+    return {
+        'is_ambiguous': reason is not None,
+        'reason'      : reason,
+        'top1_idx'    : i1,
+        'top2_idx'    : i2,
+        'margin'      : margin,
+        'candidates'  : candidates,
+    }
+
+
+
 
 def _get_model():
     global _model
@@ -224,9 +274,22 @@ def _predict_one(image_file, model):
     tensor = _preprocess(img_clean)
     probs  = model.predict(tensor, verbose=0)[0]
 
-    pred_idx   = int(np.argmax(probs))
-    pred_class = CLASS_NAMES[pred_idx]
-    info       = CLASS_INFO[pred_class]
+    decision   = _decide(probs)
+    pred_idx   = decision['top1_idx']
+    top1_class = CLASS_NAMES[pred_idx]
+
+    if decision['is_ambiguous']:
+        cand_labels = ' / '.join(CLASS_INFO[c]['label'] for c in decision['candidates'])
+        pred_class  = 'ambigu'
+        info = {
+            **AMBIGUOUS_INFO,
+            'desc': (f'Prediksi ambigu — perlu verifikasi manual. '
+                     f'{AMBIGUOUS_REASONS[decision["reason"]]} '
+                     f'(kandidat: {cand_labels}; selisih {decision["margin"] * 100:.2f} poin).'),
+        }
+    else:
+        pred_class = top1_class
+        info       = CLASS_INFO[pred_class]
 
     probabilities = [
         {
@@ -241,8 +304,9 @@ def _predict_one(image_file, model):
     probabilities.sort(key=lambda x: x['value'], reverse=True)
 
     print(
-        f'[PREDICT] Done: {filename} | pred={pred_class} | '
+        f'[PREDICT] Done: {filename} | pred={pred_class} | top1={top1_class} | '
         f'confidence={float(probs[pred_idx]) * 100:.2f}% | '
+        f'margin={decision["margin"] * 100:.2f} | '
         f'{time.time() - started_at:.2f}s'
     )
 
@@ -257,6 +321,11 @@ def _predict_one(image_file, model):
         'pred_desc'    : info['desc'],
         'confidence'   : round(float(probs[pred_idx]) * 100, 2),
         'probabilities': probabilities,
+        'is_ambiguous' : decision['is_ambiguous'],
+        'ambiguous_reason': AMBIGUOUS_REASONS.get(decision['reason'], ''),
+        'candidates'   : [CLASS_INFO[c]['label'] for c in decision['candidates']],
+        'margin'       : round(decision['margin'] * 100, 2),
+        'top1_label'   : CLASS_INFO[top1_class]['label'],
     }
 
 

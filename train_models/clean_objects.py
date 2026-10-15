@@ -45,44 +45,77 @@ SAVE_PREVIEW = True
 PREVIEW_LIMIT_PER_CLASS = 25
 
 # ============================================================
-# LOAD SEGFORMER PRE-TRAINED
+# LOAD SEGFORMER PRE-TRAINED (lazy — dimuat saat pertama dipakai)
+# Agar fungsi di file ini bisa di-import oleh validate_segformer.py
+# tanpa langsung memproses ulang seluruh dataset.
 # ============================================================
-print('Loading SegFormer-B0 road scene segmentation...')
-from transformers import SegformerImageProcessor, SegformerForSemanticSegmentation
-import torch
-import torch.nn.functional as F
+SEGFORMER_NAME = 'Marco333/segformer-b0-road-scene-7class'
 
-processor = SegformerImageProcessor.from_pretrained(
-    'Marco333/segformer-b0-road-scene-7class'
-)
-model = SegformerForSemanticSegmentation.from_pretrained(
-    'Marco333/segformer-b0-road-scene-7class'
-)
-model.eval()
-print('✅ SegFormer-B0 siap')
+processor = None
+model = None
+
+
+def load_segformer():
+    global processor, model
+    if model is None:
+        print('Loading SegFormer-B0 road scene segmentation...')
+        from transformers import SegformerImageProcessor, SegformerForSemanticSegmentation
+
+        processor = SegformerImageProcessor.from_pretrained(SEGFORMER_NAME)
+        model = SegformerForSemanticSegmentation.from_pretrained(SEGFORMER_NAME)
+        model.eval()
+        print('✅ SegFormer-B0 siap')
+    return model, processor
 
 # ============================================================
 # FUNGSI SEGMENTASI JALAN
 # ============================================================
-def segment_road(img_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray, float, bool]:
-    """Return (result_bgr, road_mask_255) dengan fokus utama pada area jalan."""
+def predict_segformer(img_bgr: np.ndarray, return_prob: bool = False):
+    """Inferensi SegFormer murni (tanpa post-processing).
+
+    Return:
+        class_map (H, W) int  — kelas hasil argmax per piksel
+        keep_prob (H, W) float32 — probabilitas softmax kelas KEEP_CLASS_IDS
+                                   (hanya jika return_prob=True, selain itu None)
+    """
+    import torch
+    import torch.nn.functional as F
+
+    seg_model, seg_processor = load_segformer()
+
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     pil_img = Image.fromarray(img_rgb)
     h, w = img_bgr.shape[:2]
 
-    inputs = processor(images=pil_img, return_tensors='pt')
+    inputs = seg_processor(images=pil_img, return_tensors='pt')
 
     with torch.no_grad():
-        outputs = model(**inputs)
+        outputs = seg_model(**inputs)
 
-    # Upsample logits ke ukuran asli
-    mask = F.interpolate(
-        outputs.logits,
-        size=(h, w),
-        mode='bilinear',
-        align_corners=False
-    ).argmax(dim=1)[0].numpy()
+        # Upsample logits ke ukuran asli
+        logits = F.interpolate(
+            outputs.logits,
+            size=(h, w),
+            mode='bilinear',
+            align_corners=False
+        )
+        class_map = logits.argmax(dim=1)[0].numpy()
 
+        keep_prob = None
+        if return_prob:
+            keep_prob = torch.softmax(logits, dim=1)[0, KEEP_CLASS_IDS].sum(dim=0)
+            keep_prob = keep_prob.numpy().astype(np.float32)
+
+    return class_map, keep_prob
+
+
+def postprocess_road_mask(mask: np.ndarray) -> tuple[np.ndarray, bool]:
+    """Post-processing class_map SegFormer → mask jalan biner (0/1).
+
+    Langkah: morfologi close/open → komponen terhubung di bagian bawah
+    → isi lubang → fallback (prior trapesium) bila area jalan terlalu kecil.
+    Return (road_mask_01, used_fallback).
+    """
     # Buat mask awal sesuai class yang dipilih (default: road only)
     road_mask = np.isin(mask, KEEP_CLASS_IDS).astype(np.uint8)  # 1=keep, 0=mask
 
@@ -154,6 +187,14 @@ def segment_road(img_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray, float, bo
         else:
             road_mask = prior
 
+    return road_mask.astype(np.uint8), used_fallback
+
+
+def segment_road(img_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray, float, bool]:
+    """Return (result_bgr, road_mask_255, road_ratio, used_fallback) dengan fokus utama pada area jalan."""
+    mask, _ = predict_segformer(img_bgr)
+    road_mask, used_fallback = postprocess_road_mask(mask)
+
     # Feather edge agar transisi road vs non-road lebih natural/rapi
     soft_mask = cv2.GaussianBlur(road_mask.astype(np.float32), (0, 0), EDGE_FEATHER_SIGMA)
     soft_mask = np.clip(soft_mask, 0.0, 1.0)[..., None]
@@ -173,85 +214,90 @@ def segment_road(img_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray, float, bo
 # ============================================================
 # PROSES SEMUA GAMBAR
 # ============================================================
-total_processed = 0
-total_masked    = 0
-total_fallback  = 0
-all_road_ratios = []
+def main():
+    total_processed = 0
+    total_masked    = 0
+    total_fallback  = 0
+    all_road_ratios = []
 
-for cls in CLASSES:
-    src_path = os.path.join(SOURCE_DIR, cls)
-    out_path = os.path.join(OUTPUT_DIR, cls)
-    preview_path = os.path.join(OUTPUT_DIR, '_preview', cls)
+    for cls in CLASSES:
+        src_path = os.path.join(SOURCE_DIR, cls)
+        out_path = os.path.join(OUTPUT_DIR, cls)
+        preview_path = os.path.join(OUTPUT_DIR, '_preview', cls)
 
-    if not os.path.exists(src_path):
-        print(f'⚠️  Folder tidak ditemukan: {src_path}')
-        continue
-
-    os.makedirs(out_path, exist_ok=True)
-    if SAVE_PREVIEW:
-        os.makedirs(preview_path, exist_ok=True)
-
-    images = sorted([f for f in os.listdir(src_path) if f.lower().endswith(IMAGE_EXTS)])
-    n = len(images)
-    print(f'\n📂 {cls}: {n} gambar')
-    cls_road_ratios = []
-    cls_fallback_count = 0
-
-    for i, fname in enumerate(images, 1):
-        img_path = os.path.join(src_path, fname)
-        save_path = os.path.join(out_path, fname)
-
-        img = cv2.imread(img_path)
-        if img is None:
-            print(f'   ⚠️  Skip (tidak bisa dibaca): {fname}')
+        if not os.path.exists(src_path):
+            print(f'⚠️  Folder tidak ditemukan: {src_path}')
             continue
 
-        # Segmentasi: keep fokus jalan, redupkan area non-jalan
-        result, road_mask, road_ratio, used_fallback = segment_road(img)
+        os.makedirs(out_path, exist_ok=True)
+        if SAVE_PREVIEW:
+            os.makedirs(preview_path, exist_ok=True)
 
-        cv2.imwrite(save_path, result)
-        total_processed += 1
-        cls_road_ratios.append(road_ratio)
-        all_road_ratios.append(road_ratio)
-        if used_fallback:
-            cls_fallback_count += 1
-            total_fallback += 1
+        images = sorted([f for f in os.listdir(src_path) if f.lower().endswith(IMAGE_EXTS)])
+        n = len(images)
+        print(f'\n📂 {cls}: {n} gambar')
+        cls_road_ratios = []
+        cls_fallback_count = 0
 
-        # Cek apakah ada perubahan (ada area non-jalan yang di-mask)
-        if not np.array_equal(img, result):
-            total_masked += 1
+        for i, fname in enumerate(images, 1):
+            img_path = os.path.join(src_path, fname)
+            save_path = os.path.join(out_path, fname)
 
-        if SAVE_PREVIEW and i <= PREVIEW_LIMIT_PER_CLASS:
-            mask_vis = cv2.cvtColor(road_mask, cv2.COLOR_GRAY2BGR)
-            comparison = np.hstack([img, mask_vis, result])
-            preview_file = os.path.join(preview_path, f'preview_{i:04d}_{fname}')
-            cv2.imwrite(preview_file, comparison)
+            img = cv2.imread(img_path)
+            if img is None:
+                print(f'   ⚠️  Skip (tidak bisa dibaca): {fname}')
+                continue
 
-        if i % 50 == 0 or i == n:
-            print(f'   [{i}/{n}] {total_masked} gambar di-mask...')
+            # Segmentasi: keep fokus jalan, redupkan area non-jalan
+            result, road_mask, road_ratio, used_fallback = segment_road(img)
 
-    if len(cls_road_ratios) > 0:
-        cls_min = float(np.min(cls_road_ratios))
-        cls_med = float(np.median(cls_road_ratios))
-        cls_max = float(np.max(cls_road_ratios))
-        cls_mean = float(np.mean(cls_road_ratios))
-        print(f'   Road ratio {cls:10s}: min={cls_min:.3f} | median={cls_med:.3f} | mean={cls_mean:.3f} | max={cls_max:.3f}')
-        print(f'   Fallback digunakan : {cls_fallback_count}/{len(cls_road_ratios)} gambar')
+            cv2.imwrite(save_path, result)
+            total_processed += 1
+            cls_road_ratios.append(road_ratio)
+            all_road_ratios.append(road_ratio)
+            if used_fallback:
+                cls_fallback_count += 1
+                total_fallback += 1
 
-print(f'\n{"=" * 55}')
-print(f'🎉 Selesai!')
-print(f'   Total diproses  : {total_processed} gambar')
-print(f'   Total di-mask   : {total_masked} gambar')
-print(f'   Total fallback  : {total_fallback} gambar')
-if len(all_road_ratios) > 0:
-    all_min = float(np.min(all_road_ratios))
-    all_med = float(np.median(all_road_ratios))
-    all_max = float(np.max(all_road_ratios))
-    all_mean = float(np.mean(all_road_ratios))
-    print(f'   Road ratio all  : min={all_min:.3f} | median={all_med:.3f} | mean={all_mean:.3f} | max={all_max:.3f}')
-print(f'   Output folder   : {OUTPUT_DIR}')
-if SAVE_PREVIEW:
-    print(f'   Preview folder  : {os.path.join(OUTPUT_DIR, "_preview")}')
-print(f'{"=" * 55}')
-print(f'\n➡️  Selanjutnya: jalankan split_dataset.py')
-print(f'   (pastikan SOURCE_DIR sudah diubah ke dataset_all_clean/)')
+            # Cek apakah ada perubahan (ada area non-jalan yang di-mask)
+            if not np.array_equal(img, result):
+                total_masked += 1
+
+            if SAVE_PREVIEW and i <= PREVIEW_LIMIT_PER_CLASS:
+                mask_vis = cv2.cvtColor(road_mask, cv2.COLOR_GRAY2BGR)
+                comparison = np.hstack([img, mask_vis, result])
+                preview_file = os.path.join(preview_path, f'preview_{i:04d}_{fname}')
+                cv2.imwrite(preview_file, comparison)
+
+            if i % 50 == 0 or i == n:
+                print(f'   [{i}/{n}] {total_masked} gambar di-mask...')
+
+        if len(cls_road_ratios) > 0:
+            cls_min = float(np.min(cls_road_ratios))
+            cls_med = float(np.median(cls_road_ratios))
+            cls_max = float(np.max(cls_road_ratios))
+            cls_mean = float(np.mean(cls_road_ratios))
+            print(f'   Road ratio {cls:10s}: min={cls_min:.3f} | median={cls_med:.3f} | mean={cls_mean:.3f} | max={cls_max:.3f}')
+            print(f'   Fallback digunakan : {cls_fallback_count}/{len(cls_road_ratios)} gambar')
+
+    print(f'\n{"=" * 55}')
+    print(f'🎉 Selesai!')
+    print(f'   Total diproses  : {total_processed} gambar')
+    print(f'   Total di-mask   : {total_masked} gambar')
+    print(f'   Total fallback  : {total_fallback} gambar')
+    if len(all_road_ratios) > 0:
+        all_min = float(np.min(all_road_ratios))
+        all_med = float(np.median(all_road_ratios))
+        all_max = float(np.max(all_road_ratios))
+        all_mean = float(np.mean(all_road_ratios))
+        print(f'   Road ratio all  : min={all_min:.3f} | median={all_med:.3f} | mean={all_mean:.3f} | max={all_max:.3f}')
+    print(f'   Output folder   : {OUTPUT_DIR}')
+    if SAVE_PREVIEW:
+        print(f'   Preview folder  : {os.path.join(OUTPUT_DIR, "_preview")}')
+    print(f'{"=" * 55}')
+    print(f'\n➡️  Selanjutnya: jalankan split_dataset.py')
+    print(f'   (pastikan SOURCE_DIR sudah diubah ke dataset_all_clean/)')
+
+
+if __name__ == '__main__':
+    main()

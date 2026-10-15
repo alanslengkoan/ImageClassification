@@ -57,3 +57,10 @@ MODEL_PATH = (
 DATA_UPLOAD_MAX_MEMORY_SIZE  = 100 * 1024 * 1024
 FILE_UPLOAD_MAX_MEMORY_SIZE  = 10  * 1024 * 1024   # maks 10 MB per file
 MAX_UPLOAD_FILES             = 10                   # maks 10 file sekaligus
+
+# Aturan tie / near-tie (harus sama dengan train_models/decision_rule.py)
+# Prediksi dianggap AMBIGU (perlu verifikasi manual) jika:
+#   top1 - top2 < PREDICTION_TIE_MARGIN   (seri / hampir seri), atau
+#   top1        < PREDICTION_MIN_CONFIDENCE
+PREDICTION_TIE_MARGIN     = 0.10
+PREDICTION_MIN_CONFIDENCE = 0.50

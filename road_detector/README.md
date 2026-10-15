@@ -133,9 +133,19 @@ Hentikan server dengan `CTRL + C`.
 2. Pilih **1 sampai 10 gambar** jalan (format umum: JPG/PNG).
 3. Klik tombol unggah/analisis.
 4. Sistem menampilkan untuk tiap gambar:
-   - Kelas prediksi (Baik / Sedang / Berat)
+   - Kelas prediksi (Baik / Sedang / Berat), **atau "Ambigu · Perlu Verifikasi"**
+     bila dua kelas teratas seri atau hampir seri
    - Tingkat keyakinan (confidence)
    - Distribusi probabilitas semua kelas
+
+### Aturan prediksi ambigu (di `settings.py`)
+
+| Pengaturan | Nilai | Arti |
+|-----------|-------|------|
+| `PREDICTION_TIE_MARGIN` | 0.10 | Ambigu bila selisih top-1 dan top-2 < 10 poin |
+| `PREDICTION_MIN_CONFIDENCE` | 0.50 | Ambigu bila confidence top-1 < 50% |
+
+Nilai ini harus sama dengan `train_models/decision_rule.py`.
 
 > **Catatan:** Model di-load secara *lazy* (saat upload pertama), sehingga
 > prediksi pertama akan sedikit lebih lambat. Upload berikutnya lebih cepat.

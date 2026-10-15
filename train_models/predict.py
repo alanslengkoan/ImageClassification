@@ -14,6 +14,8 @@ from tensorflow.keras.models import load_model
 import warnings
 warnings.filterwarnings('ignore')
 
+from decision_rule import AMBIGUOUS_CLASS, TIE_MARGIN, MIN_CONFIDENCE, decide
+
 # ============================================================
 # KONFIGURASI
 # ============================================================
@@ -27,7 +29,9 @@ CLASS_LABELS = {
     'baik'  : ('Baik',   '#4CAF50', '🟢'),   # hijau
     'sedang': ('Sedang', '#FF9800', '🟡'),   # oranye
     'berat' : ('Berat',  '#F44336', '🔴'),   # merah
+    AMBIGUOUS_CLASS: ('Ambigu (perlu verifikasi)', '#9E9E9E', '⚠️'),   # abu-abu
 }
+SUMMARY_CLASSES = CLASS_NAMES + [AMBIGUOUS_CLASS]
 
 # ============================================================
 # LOAD MODEL
@@ -64,17 +68,23 @@ def predict_image(model, image_path: str, show_plot: bool = True) -> dict:
     img_input = preprocess_image(image_path)
     probs     = model.predict(img_input, verbose=0)[0]
 
-    pred_idx   = int(np.argmax(probs))
-    pred_class = CLASS_NAMES[pred_idx]
-    confidence = float(probs[pred_idx]) * 100
+    # Aturan tie / near-tie: jangan paksa argmax bila top-1 dan top-2 hampir seimbang
+    decision   = decide(probs, CLASS_NAMES)
+    pred_class = decision['pred_class']            # 'ambigu' bila tie / near-tie
+    confidence = decision['top1_prob'] * 100
 
     label, color, icon = CLASS_LABELS[pred_class]
 
     result = {
-        'image_path' : image_path,
-        'class'      : pred_class,
-        'label'      : label,
-        'confidence' : confidence,
+        'image_path'  : image_path,
+        'class'       : pred_class,
+        'label'       : label,
+        'confidence'  : confidence,
+        'top1_class'  : decision['top1_class'],
+        'is_ambiguous': decision['is_ambiguous'],
+        'reason'      : decision['reason'],
+        'candidates'  : decision['candidates'],
+        'margin'      : decision['margin'] * 100,
         'probabilities': {CLASS_NAMES[i]: float(probs[i]) * 100 for i in range(len(CLASS_NAMES))},
     }
 
@@ -83,7 +93,12 @@ def predict_image(model, image_path: str, show_plot: bool = True) -> dict:
     print(f'{"=" * 55}')
     print(f'   File        : {os.path.basename(image_path)}')
     print(f'   Prediksi    : {icon} {label}')
-    print(f'   Confidence  : {confidence:.2f}%')
+    print(f'   Confidence  : {confidence:.2f}% (top-1: {CLASS_LABELS[decision["top1_class"]][0]})')
+    print(f'   Selisih top1-top2 : {decision["margin"] * 100:.2f} poin '
+          f'(ambang tie < {TIE_MARGIN * 100:.0f} poin, min conf {MIN_CONFIDENCE * 100:.0f}%)')
+    if decision['is_ambiguous']:
+        cands = ' / '.join(CLASS_LABELS[c][0] for c in decision['candidates'])
+        print(f'   ⚠️  PREDIKSI AMBIGU ({decision["reason"]}) — perlu verifikasi manual. Kandidat: {cands}')
     print(f'\n   Probabilitas per kelas:')
     for cls in CLASS_NAMES:
         lbl, _, ic = CLASS_LABELS[cls]
@@ -111,7 +126,7 @@ def predict_folder(model, folder_path: str, save_summary: bool = True) -> list:
     print('-' * 55)
 
     results = []
-    counts  = {cls: 0 for cls in CLASS_NAMES}
+    counts  = {cls: 0 for cls in SUMMARY_CLASSES}
 
     for fname in sorted(images):
         fpath  = os.path.join(folder_path, fname)
@@ -121,11 +136,18 @@ def predict_folder(model, folder_path: str, save_summary: bool = True) -> list:
 
     print(f'\n📊 Ringkasan Prediksi Batch ({len(images)} gambar):')
     print('-' * 45)
-    for cls in CLASS_NAMES:
+    for cls in SUMMARY_CLASSES:
         lbl, _, ic = CLASS_LABELS[cls]
         pct = counts[cls] / len(images) * 100
         print(f'   {ic} {lbl:8s}: {counts[cls]:3d} gambar ({pct:.1f}%)')
     print('-' * 45)
+    if counts[AMBIGUOUS_CLASS]:
+        print('   ⚠️  Gambar ambigu (perlu verifikasi manual):')
+        for r in results:
+            if r['is_ambiguous']:
+                cands = ' / '.join(CLASS_LABELS[c][0] for c in r['candidates'])
+                print(f'      - {os.path.basename(r["image_path"])}: {cands} (selisih {r["margin"]:.2f} poin)')
+        print('-' * 45)
 
     if save_summary:
         _plot_batch_summary(results, counts, folder_path)
@@ -143,8 +165,12 @@ def _plot_result(image_path: str, result: dict, color: str, label: str, icon: st
                  fontsize=13, fontweight='bold')
 
     ax_img.imshow(img)
-    ax_img.set_title(f'{icon}  Prediksi: {label}  ({result["confidence"]:.2f}%)',
-                     fontsize=12, color=color, fontweight='bold')
+    if result.get('is_ambiguous'):
+        cands = ' / '.join(CLASS_LABELS[c][0] for c in result['candidates'])
+        title = f'Prediksi: AMBIGU — perlu verifikasi\nKandidat: {cands} (selisih {result["margin"]:.2f} poin)'
+    else:
+        title = f'{icon}  Prediksi: {label}  ({result["confidence"]:.2f}%)'
+    ax_img.set_title(title, fontsize=12, color=color, fontweight='bold')
     ax_img.axis('off')
 
     classes = CLASS_NAMES
@@ -175,10 +201,11 @@ def _plot_result(image_path: str, result: dict, color: str, label: str, icon: st
 # PLOT RINGKASAN BATCH
 # ============================================================
 def _plot_batch_summary(results: list, counts: dict, folder_path: str):
-    labels  = [CLASS_LABELS[c][0] for c in CLASS_NAMES]
-    sizes   = [counts[c] for c in CLASS_NAMES]
-    colors  = [CLASS_LABELS[c][1] for c in CLASS_NAMES]
-    explode = [0.05] * len(CLASS_NAMES)
+    shown   = [c for c in SUMMARY_CLASSES if counts.get(c, 0) > 0]
+    labels  = [CLASS_LABELS[c][0] for c in shown]
+    sizes   = [counts[c] for c in shown]
+    colors  = [CLASS_LABELS[c][1] for c in shown]
+    explode = [0.05] * len(shown)
 
     fig, (ax_pie, ax_conf) = plt.subplots(1, 2, figsize=(13, 5))
     fig.suptitle(f'Ringkasan Prediksi Batch — {len(results)} Gambar\nFolder: {os.path.basename(folder_path)}',
@@ -201,7 +228,7 @@ def _plot_batch_summary(results: list, counts: dict, folder_path: str):
     ax_conf.set_title('Confidence per Gambar')
     ax_conf.set_ylim(0, 105); ax_conf.grid(True, alpha=0.3)
 
-    patches = [mpatches.Patch(color=CLASS_LABELS[c][1], label=CLASS_LABELS[c][0]) for c in CLASS_NAMES]
+    patches = [mpatches.Patch(color=CLASS_LABELS[c][1], label=CLASS_LABELS[c][0]) for c in SUMMARY_CLASSES]
     ax_conf.legend(handles=patches, loc='lower right')
 
     plt.tight_layout()

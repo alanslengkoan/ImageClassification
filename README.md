@@ -444,4 +444,106 @@ ResNet50 akan mengungguli MobileNetV2 jika:
 
 ---
 
+## 11. Validasi Segmentasi SegFormer-B0 (Ground-Truth Mask & mAP50-95)
+
+Sebelum diklasifikasi, setiap foto dibersihkan oleh SegFormer-B0
+(`Marco333/segformer-b0-road-scene-7class`). Area selain jalan dihitamkan.
+Agar kualitas tahap ini **terukur**, mask jalan hasil SegFormer dibandingkan
+dengan mask **ground-truth** hasil anotasi manual.
+
+### 11.1 Alur Kerja
+
+```bash
+cd train_models
+
+# 1) Ambil N gambar per kelas dari split TEST (stratified, seed tetap)
+python3 validate_segformer.py --prepare 20
+#    → segmentation_gt/images/<kelas>/*.jpg
+
+# 2) Anotasi area jalan untuk setiap gambar, pilih salah satu format:
+#    a. Mask PNG biner : segmentation_gt/masks/<kelas>/<nama>.png
+#                        putih (>127) = jalan, hitam = bukan jalan
+#                        (ukuran boleh berbeda, di-resize nearest-neighbour)
+#    b. LabelMe JSON   : segmentation_gt/images/<kelas>/<nama>.json
+#                        polygon dengan label "jalan" / "road" / "aspal"
+
+# 3) Jalankan validasi
+python3 validate_segformer.py
+```
+
+Gambar yang belum memiliki mask dilewati secara otomatis. Semua hasil
+disimpan di `train_models/dataset/output/segmentation_validation/`:
+
+| File | Isi |
+|------|-----|
+| `segformer_validation_report.txt` | Tabel metrik RAW vs POST, AP per threshold, metrik per kelas |
+| `segformer_validation_summary.json` | Semua angka dalam bentuk JSON (untuk tabel skripsi) |
+| `segformer_validation_per_image.csv` | Metrik per gambar |
+| `segformer_ap_iou.png` | Kurva AP vs threshold IoU dan histogram IoU |
+| `segformer_per_class_metrics.png` | IoU/Dice/mAP per kelas kondisi jalan |
+| `preview/` | Overlay: hijau = TP, merah = FP, biru = FN |
+
+### 11.2 Definisi Metrik
+
+| Metrik | Rumus / Arti |
+|--------|--------------|
+| IoU | TP / (TP + FP + FN), dihitung per piksel jalan |
+| Dice / F1 | 2TP / (2TP + FP + FN) |
+| Precision / Recall | TP / (TP + FP) dan TP / (TP + FN) |
+| Pixel Accuracy | (TP + TN) / total piksel |
+| mIoU | rata-rata IoU kelas jalan dan kelas latar |
+| AP@t | Area di bawah kurva precision-recall (interpolasi 101 titik, COCO). Mask dihitung benar (TP) jika IoU ≥ t |
+| **mAP50-95** | rata-rata AP pada t = 0.50, 0.55, …, 0.95 (standar COCO) |
+
+Catatan metodologi:
+- Satu gambar diperlakukan sebagai satu instance "jalan". Skor confidence-nya
+  adalah rata-rata probabilitas kelas *road* di dalam mask prediksi, dan
+  dipakai untuk mengurutkan prediksi saat menghitung AP.
+- **RAW** adalah output mentah SegFormer (`argmax == road`). **POST** adalah
+  mask setelah post-processing di `clean_objects.py` (morfologi, komponen
+  bawah, fill holes, fallback), yaitu mask yang benar-benar dipakai sebelum
+  klasifikasi.
+- Bila prediksi dan GT sama-sama kosong, IoU = 1. Bila tidak ada GT yang
+  berisi jalan, AP tidak terdefinisi (NaN).
+
+Unit test perhitungan metrik ini tidak membutuhkan torch/tensorflow:
+`python3 train_models/test_segmentation_metrics.py`.
+
+---
+
+## 12. Aturan Tie / Near-Tie (Prediksi Ambigu)
+
+Classifier menghasilkan probabilitas softmax. Bila dua kelas teratas hampir
+sama (misalnya Berat 49% vs Sedang 49%), `argmax` tetap akan memaksa satu
+kelas, padahal model sebenarnya tidak yakin. Karena itu sistem **tidak
+memaksa kelas** dan mengeluarkan status **"Ambigu — perlu verifikasi"**
+bila:
+
+| Kondisi | Alasan (`reason`) |
+|---------|-------------------|
+| top1 − top2 ≤ 1e-6 | `tie` (seri persis) |
+| top1 − top2 < **0.10** (`TIE_MARGIN`) | `near_tie` (hampir seri) |
+| top1 < **0.50** (`MIN_CONFIDENCE`) | `low_confidence` |
+
+Semua kelas yang berjarak < `TIE_MARGIN` dari top-1 ditampilkan sebagai
+**kandidat**.
+
+Implementasi:
+- `train_models/decision_rule.py` berisi `decide()` dan `selective_metrics()`.
+- `train_models/predict.py` (CLI) menampilkan "AMBIGU — perlu verifikasi"
+  beserta kandidat kelasnya. Ringkasan batch juga memuat jumlah gambar ambigu.
+- `train_models/compare_models.py` menambahkan metrik selektif ke
+  `comparison_classification_report.txt`:
+  - jumlah ambigu,
+  - *coverage* (persentase gambar yang mendapat prediksi pasti),
+  - akurasi pada prediksi pasti,
+  - error rate bila prediksi ambigu tetap dipaksa.
+- Aplikasi web (`road_detector/detector/views.py`) menampilkan badge abu-abu
+  "Ambigu · Perlu Verifikasi" beserta kotak peringatan. Ambangnya diatur di
+  `road_detector/road_detector/settings.py` (`PREDICTION_TIE_MARGIN`,
+  `PREDICTION_MIN_CONFIDENCE`) dan **harus disamakan** dengan
+  `decision_rule.py`.
+
+---
+
 *Dokumen ini dibuat sebagai bagian dari penelitian klasifikasi kerusakan jalan menggunakan Convolutional Neural Network (CNN) dengan pendekatan Transfer Learning.*

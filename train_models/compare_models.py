@@ -23,6 +23,8 @@ from itertools import cycle
 import warnings
 warnings.filterwarnings('ignore')
 
+from decision_rule import selective_metrics, TIE_MARGIN, MIN_CONFIDENCE
+
 print('✅ TensorFlow version :', tf.__version__)
 
 # ============================================================
@@ -220,6 +222,35 @@ with open(report_path, 'w') as f:
 print(f'✅ Report perbandingan tersimpan: {report_path}')
 
 # ============================================================
+# 3b. ATURAN TIE / NEAR-TIE (prediksi ambigu → perlu verifikasi)
+# ============================================================
+sel_resnet    = selective_metrics(y_true, prob_resnet)
+sel_mobilenet = selective_metrics(y_true, prob_mobilenet)
+
+
+def _pct(v):
+    return 'n/a' if np.isnan(v) else f'{v * 100:.2f}%'
+
+
+sel_lines = [
+    '=' * 60,
+    'ATURAN TIE / NEAR-TIE — Prediksi Ambigu (Perlu Verifikasi)',
+    f'Ambigu jika top1 - top2 < {TIE_MARGIN:.2f} atau top1 < {MIN_CONFIDENCE:.2f}',
+    '=' * 60,
+    f'{"":30} {"ResNet50":>12} {"MobileNetV2":>12}',
+    f'{"Jumlah ambigu":30} {sel_resnet["n_ambiguous"]:>12d} {sel_mobilenet["n_ambiguous"]:>12d}',
+    f'{"Coverage (prediksi pasti)":30} {_pct(sel_resnet["coverage"]):>12} {_pct(sel_mobilenet["coverage"]):>12}',
+    f'{"Akurasi argmax (semua)":30} {_pct(sel_resnet["accuracy_all"]):>12} {_pct(sel_mobilenet["accuracy_all"]):>12}',
+    f'{"Akurasi prediksi pasti":30} {_pct(sel_resnet["accuracy_accepted"]):>12} {_pct(sel_mobilenet["accuracy_accepted"]):>12}',
+    f'{"Error jika ambigu dipaksa":30} {_pct(sel_resnet["error_rate_ambiguous"]):>12} {_pct(sel_mobilenet["error_rate_ambiguous"]):>12}',
+    '=' * 60,
+]
+print('\n' + '\n'.join(sel_lines))
+with open(report_path, 'a') as f:
+    f.write('\n\n' + '\n'.join(sel_lines) + '\n')
+print(f'✅ Ringkasan aturan ambigu ditambahkan ke: {report_path}')
+
+# ============================================================
 # 4. ROC CURVE — keduanya dalam 1 grafik per kelas
 # ============================================================
 y_bin = label_binarize(y_true, classes=list(range(NUM_CLASSES)))
@@ -339,6 +370,9 @@ print(f'   {"-" * 53}')
 status_resnet = 'PASS' if loss_resnet <= LOSS_TARGET else 'FAIL'
 status_mobilenet = 'PASS' if loss_mobilenet <= LOSS_TARGET else 'FAIL'
 print(f'   {"Target Loss <= 0.50":<25} {status_resnet:>14} {status_mobilenet:>14}')
+print(f'   {"Prediksi ambigu":<25} {sel_resnet["n_ambiguous"]:>14d} {sel_mobilenet["n_ambiguous"]:>14d}')
+print(f'   {"Akurasi prediksi pasti":<25} {_pct(sel_resnet["accuracy_accepted"]):>14} '
+      f'{_pct(sel_mobilenet["accuracy_accepted"]):>14}')
 if delta > 0:
     print(f'   {"Selisih Accuracy":<25} {f"{delta:+.2f}% (MobileNetV2 unggul)":>28}')
 elif delta < 0:

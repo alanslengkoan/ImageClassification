@@ -98,3 +98,20 @@ Hasil selalu di kisaran yang sama karena **bottleneck-nya adalah data, bukan hyp
 > Hasil yang mentok di ~77% pada Laptop A disebabkan oleh **keterbatasan jumlah data** (840 gambar) untuk model dengan jutaan parameter, ditambah **kelas "Sedang" dan "Berat" yang sangat mirip** secara visual.
 >
 > **Tuning hyperparameter saja tidak cukup** — solusi paling efektif adalah menambah jumlah dan kualitas data training, terutama untuk kelas yang sulit dibedakan.
+
+---
+
+## 6. Tambahan Revisi: Prediksi Ambigu & Validasi Segmentasi
+
+- **Prediksi ambigu.** Kelas Sedang dan Berat sangat mirip (lihat bagian 2b),
+  sehingga model kadang memberi probabilitas yang hampir sama, misalnya 49% vs
+  49%. Untuk kasus seperti ini sistem tidak lagi memaksa `argmax`. Hasilnya
+  ditandai **"Ambigu — perlu verifikasi"** bila selisih top-1 dan top-2
+  kurang dari 10 poin, atau bila confidence top-1 di bawah 50%.
+  `compare_models.py` melaporkan jumlah prediksi ambigu dan akurasi pada
+  prediksi yang pasti.
+- **Validasi SegFormer-B0.** Kualitas tahap pembersihan objek kini diukur
+  terhadap mask ground-truth: IoU, Dice, Precision, Recall, AP50, AP75 dan
+  **mAP50-95**. Cara anotasi dan cara menjalankannya ada di `README.md`
+  bagian 11.
+
