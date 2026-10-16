@@ -83,18 +83,20 @@ Hasil: 20 foto per kelas (total 60) tersalin ke `D:\ImageClassification-CNN\trai
 
 ```bash
 cd /mnt/d/ImageClassification-CNN/train_models
-labelme segmentation_gt/images/baik --labels jalan --nodata --autosave
+labelme segmentation_gt/images/baik --labels jalan
 ```
 
 1. Tekan `Ctrl+N` → klik mengelilingi tepi jalan → klik titik awal untuk menutup polygon
 2. Pilih label **`jalan`**
-3. Tekan `D` untuk gambar berikutnya (tersimpan otomatis sebagai `.json`)
+3. Tekan `D` untuk gambar berikutnya (`A` untuk kembali). Anotasi tersimpan otomatis sebagai `.json` di samping gambar.
 4. Setelah selesai, tutup LabelMe lalu ulangi untuk folder `sedang` dan `berat`:
 
 ```bash
-labelme segmentation_gt/images/sedang --labels jalan --nodata --autosave
-labelme segmentation_gt/images/berat  --labels jalan --nodata --autosave
+labelme segmentation_gt/images/sedang --labels jalan
+labelme segmentation_gt/images/berat  --labels jalan
 ```
+
+> Jika muncul `unrecognized arguments`, pastikan perintahnya persis seperti di atas. Opsi lama `--nodata` dan `--autosave` sudah tidak ada di LabelMe versi baru (v7) karena keduanya sekarang sudah aktif secara bawaan.
 
 **Aturan anotasi:**
 
@@ -108,7 +110,7 @@ labelme segmentation_gt/images/berat  --labels jalan --nodata --autosave
 >
 > ```powershell
 > pip install labelme
-> labelme D:\ImageClassification-CNN\train_models\segmentation_gt\images\baik --labels jalan --nodata --autosave
+> labelme D:\ImageClassification-CNN\train_models\segmentation_gt\images\baik --labels jalan
 > ```
 >
 > Hasil `.json`-nya sama dan bisa langsung dipakai di Langkah 6.
@@ -161,6 +163,7 @@ Folder ini bisa dibuka langsung dari **File Explorer** Windows.
 | `libGL.so.1: cannot open shared object file` | `sudo apt install -y libgl1 libglib2.0-0` |
 | `No module named 'numpy'` / `'torch'` | Library belum terpasang, ulangi Langkah 1 |
 | `labelme: command not found` | `export PATH="$HOME/.local/bin:$PATH"` lalu coba lagi |
+| `labelme: error: unrecognized arguments: --nodata --autosave` | Hapus kedua opsi itu: `labelme segmentation_gt/images/baik --labels jalan` |
 | `No such file or directory: /mnt/d/...` | Pastikan folder proyek ada di `D:\ImageClassification-CNN` |
 | `Folder tidak ditemukan` saat `--prepare` | Langkah 2 belum dijalankan |
 | `No module named 'segmentation_metrics'` | Jalankan dari dalam folder `train_models` |
