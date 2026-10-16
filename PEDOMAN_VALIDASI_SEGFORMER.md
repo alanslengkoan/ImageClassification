@@ -98,6 +98,45 @@ labelme segmentation_gt/images/berat  --labels jalan
 
 > Jika muncul `unrecognized arguments`, pastikan perintahnya persis seperti di atas. Opsi lama `--nodata` dan `--autosave` sudah tidak ada di LabelMe versi baru (v7) karena keduanya sekarang sudah aktif secara bawaan.
 
+#### Cara cepat: anotasi dibantu AI (SAM 2)
+
+Daripada mengklik tepi jalan satu per satu, LabelMe bisa membuat polygon otomatis memakai model **SAM 2**. Fitur ini berjalan di CPU, jadi tidak perlu GPU.
+
+**a. Unduh model (sekali saja, butuh internet)**
+
+1. Di toolbar atas ada panel **AI-Assisted Annotation**. Panel ini baru aktif setelah memilih mode **AI-Points** atau **AI-Box** di toolbar kiri, paling bawah.
+2. Buka dropdown model → pilih **Download a model…** → unduh **Sam2 (balanced)** (±330 MB). Untuk laptop yang lambat, pilih **Sam2 (speed)** (±185 MB).
+3. Setelah unduhan selesai, pilih model tersebut di dropdown.
+
+> Jika tampilan LabelMe berbahasa Indonesia, menunya bernama **Anotasi berbasis AI**, **Unduh model…**, dan **Kelola model…**.
+> Di LabelMe v6, model langsung terunduh otomatis saat titik pertama diklik.
+> Model disimpan di `~/.cache/osam` (Ubuntu) atau `C:\Users\<nama>\.cache\osam` (Windows), sehingga cukup diunduh sekali.
+
+**b. Pastikan format output = `Polygon`**
+
+Di panel yang sama ada dropdown kedua (format output). Pastikan isinya **`Polygon`**, karena itu nilai bawaannya.
+
+> ⚠️ **Jangan pilih `Mask`.** Script validasi hanya membaca polygon. Anotasi berformat `Mask` akan diabaikan dan gambar dianggap tidak punya jalan.
+
+**c. Anotasi**
+
+| Mode | Cara Pakai |
+|------|------------|
+| **AI-Points** (disarankan) | Klik di **atas permukaan jalan** (1–3 titik). `Shift`+klik di area yang **bukan** jalan bila ikut terpilih. Tekan `Enter` untuk selesai. |
+| **AI-Box** | Tarik kotak yang mengelilingi seluruh jalan, lalu lepas mouse. Polygon langsung jadi. |
+
+Setelah polygon jadi:
+
+1. Pilih label **`jalan`**.
+2. **Periksa hasilnya.** Jika ada bagian yang meleset, tekan `Ctrl+J` (Edit) lalu geser titik polygon, atau tekan `Ctrl+Z` dan ulangi.
+3. Tekan `D` untuk gambar berikutnya.
+
+Catatan:
+
+- Gambar pertama terasa lambat (beberapa detik) karena AI sedang menganalisis gambar. Klik berikutnya akan jauh lebih cepat.
+- Jika jalan terpecah menjadi beberapa polygon, tidak masalah. Asalkan semuanya diberi label `jalan`, semuanya otomatis digabung.
+- AI hanya membantu menggambar. **Setiap hasil tetap wajib dicek dan dirapikan manual** sesuai aturan di bawah, karena anotasi ini menjadi kunci jawaban.
+
 **Aturan anotasi:**
 
 | Termasuk jalan ✅ | Bukan jalan ❌ |
@@ -164,6 +203,11 @@ Folder ini bisa dibuka langsung dari **File Explorer** Windows.
 | `No module named 'numpy'` / `'torch'` | Library belum terpasang, ulangi Langkah 1 |
 | `labelme: command not found` | `export PATH="$HOME/.local/bin:$PATH"` lalu coba lagi |
 | `labelme: error: unrecognized arguments: --nodata --autosave` | Hapus kedua opsi itu: `labelme segmentation_gt/images/baik --labels jalan` |
+| Panel **AI-Assisted Annotation** abu-abu | Pilih dulu mode **AI-Points** / **AI-Box** di toolbar kiri |
+| Saat klik AI-Points/AI-Box muncul jendela **Settings** | Model belum diunduh → unduh **Sam2 (balanced)** di jendela itu, lalu pilih modelnya |
+| Unduhan model gagal | Cek internet, lalu ulangi dari menu yang sama |
+| AI sangat lambat | Pakai model **Sam2 (speed)** |
+| Sudah dianotasi pakai AI tapi dianggap kosong | Format output AI masih `Mask` → ganti `Polygon`, lalu anotasi ulang gambar tersebut |
 | `No such file or directory: /mnt/d/...` | Pastikan folder proyek ada di `D:\ImageClassification-CNN` |
 | `Folder tidak ditemukan` saat `--prepare` | Langkah 2 belum dijalankan |
 | `No module named 'segmentation_metrics'` | Jalankan dari dalam folder `train_models` |
