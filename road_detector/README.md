@@ -147,6 +147,14 @@ Hentikan server dengan `CTRL + C`.
 
 Nilai ini harus sama dengan `train_models/decision_rule.py`.
 
+Contoh: probabilitas **Berat 50% : Sedang 50%** → badge **"Ambigu · Perlu Verifikasi"**,
+pojok kanan menampilkan **"Seri Berat = Sedang: 50%"**, dan sistem tidak memaksa
+salah satu kelas. Uji aturan ini (tanpa perlu model asli) dengan:
+
+```bash
+python3 manage.py test detector
+```
+
 > **Catatan:** Model di-load secara *lazy* (saat upload pertama), sehingga
 > prediksi pertama akan sedikit lebih lambat. Upload berikutnya lebih cepat.
 

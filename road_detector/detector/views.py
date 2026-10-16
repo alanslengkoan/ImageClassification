@@ -322,6 +322,7 @@ def _predict_one(image_file, model):
         'confidence'   : round(float(probs[pred_idx]) * 100, 2),
         'probabilities': probabilities,
         'is_ambiguous' : decision['is_ambiguous'],
+        'is_tie'       : decision['reason'] == 'tie',   # seri persis: jangan tampilkan "Top-1"
         'ambiguous_reason': AMBIGUOUS_REASONS.get(decision['reason'], ''),
         'candidates'   : [CLASS_INFO[c]['label'] for c in decision['candidates']],
         'margin'       : round(decision['margin'] * 100, 2),
