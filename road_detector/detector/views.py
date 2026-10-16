@@ -44,14 +44,19 @@ AMBIGUOUS_REASONS = {
 }
 
 
+def _thresholds():
+    """(tie_margin, min_confidence) dari settings.py, dalam skala 0–1."""
+    return (float(getattr(settings, 'PREDICTION_TIE_MARGIN', 0.10)),
+            float(getattr(settings, 'PREDICTION_MIN_CONFIDENCE', 0.50)))
+
+
 def _decide(probs) -> dict:
     """Aturan tie/near-tie (sama dengan train_models/decision_rule.py).
 
     Tidak memaksa argmax bila top1 - top2 < PREDICTION_TIE_MARGIN atau
     top1 < PREDICTION_MIN_CONFIDENCE → status AMBIGU, perlu verifikasi.
     """
-    tie_margin = float(getattr(settings, 'PREDICTION_TIE_MARGIN', 0.10))
-    min_conf   = float(getattr(settings, 'PREDICTION_MIN_CONFIDENCE', 0.50))
+    tie_margin, min_conf = _thresholds()
 
     probs  = np.asarray(probs, dtype=np.float64).ravel()
     order  = np.argsort(-probs, kind='stable')
@@ -274,6 +279,7 @@ def _predict_one(image_file, model):
     tensor = _preprocess(img_clean)
     probs  = model.predict(tensor, verbose=0)[0]
 
+    tie_margin, min_conf = _thresholds()
     decision   = _decide(probs)
     pred_idx   = decision['top1_idx']
     top1_class = CLASS_NAMES[pred_idx]
@@ -327,6 +333,13 @@ def _predict_one(image_file, model):
         'candidates'   : [CLASS_INFO[c]['label'] for c in decision['candidates']],
         'margin'       : round(decision['margin'] * 100, 2),
         'top1_label'   : CLASS_INFO[top1_class]['label'],
+        # Data untuk kotak "Keterangan confidence"
+        'top2_label'      : CLASS_INFO[CLASS_NAMES[decision['top2_idx']]]['label'],
+        'top2_confidence' : round(float(probs[decision['top2_idx']]) * 100, 2),
+        'conf_ok'         : float(probs[pred_idx]) >= min_conf,
+        'margin_ok'       : decision['margin'] >= tie_margin,
+        'min_confidence_pct': round(min_conf * 100, 2),
+        'tie_margin_pct'    : round(tie_margin * 100, 2),
     }
 
 
@@ -357,10 +370,13 @@ def index(request):
                 except Exception as e:
                     errors.append(f'{f.name}: {e}')
 
+            tie_margin, min_conf = _thresholds()
             context = {
                 'results'     : results,
                 'errors'      : errors,
                 'total'       : len(results),
+                'min_confidence_pct': round(min_conf * 100, 2),
+                'tie_margin_pct'    : round(tie_margin * 100, 2),
             }
 
         except FileNotFoundError as e:

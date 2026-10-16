@@ -149,7 +149,21 @@ Nilai ini harus sama dengan `train_models/decision_rule.py`.
 
 Contoh: probabilitas **Berat 50% : Sedang 50%** → badge **"Ambigu · Perlu Verifikasi"**,
 pojok kanan menampilkan **"Seri Berat = Sedang: 50%"**, dan sistem tidak memaksa
-salah satu kelas. Uji aturan ini (tanpa perlu model asli) dengan:
+salah satu kelas.
+
+### Keterangan confidence di halaman hasil
+
+- **Panduan "Cara membaca nilai confidence"** (di atas hasil, bisa dilipat): menjelaskan
+  bahwa confidence = probabilitas model untuk kelas teratas (bukan luas kerusakan),
+  serta syarat prediksi pasti.
+- **Badge pojok kanan gambar** `Confidence · …% ⓘ`: arahkan kursor untuk tooltip.
+- **Kotak "Keterangan confidence"** per gambar: tingkat keyakinan model, ✅/❌ untuk
+  dua syarat (confidence ≥ `PREDICTION_MIN_CONFIDENCE`, selisih top-1 vs top-2 ≥
+  `PREDICTION_TIE_MARGIN`), lalu kesimpulan pasti/ambigu.
+
+Angka ambang di halaman diambil langsung dari `settings.py`.
+
+Uji aturan dan tampilan ini (tanpa perlu model asli) dengan:
 
 ```bash
 python3 manage.py test detector
